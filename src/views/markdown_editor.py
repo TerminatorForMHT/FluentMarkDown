@@ -5,8 +5,12 @@ from qfluentwidgets import (
     TransparentPushButton,
     CardWidget,
     ComboBox,
-    BodyLabel
+    BodyLabel,
+    ScrollBar,
+    SmoothScrollBar,
+    SingleDirectionScrollArea
 )
+from PyQt5.QtCore import Qt
 from qframelesswindow.webengine import FramelessWebEngineView
 import markdown
 from models.themes import PreviewThemes
@@ -61,15 +65,32 @@ class MarkdownWidget(QFrame):
         # 创建编辑窗口
         self.editor = QTextEdit()
         self.editor.setPlaceholderText("Write Markdown here...")
+        # 关闭编辑框原生的横竖滑动条
+        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
         # 优化光标，使其更明显
-        self.editor.setStyleSheet("""
+        self.editor.setStyleSheet('''
             background-color: transparent;
             border: 1px solid transparent;
-            border-radius: 8px;
+            border-radius: 8px 0px 0px 8px;
             padding: 10px;
             color: #333333;
             selection-background-color: rgba(100, 149, 237, 0.3);
-        """)
+        ''')
+        
+        # 创建单方向滚动区域，设置为竖直方向
+        self.scroll_area = SingleDirectionScrollArea(orient=Qt.Vertical, parent=self.editor_card)
+        # 设置滚动区域的样式，确保没有边框和背景色
+        self.scroll_area.setStyleSheet('''
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+        ''')
+        self.scroll_area.setWidget(self.editor)
+        # 确保编辑框填充整个滚动区域
+        self.scroll_area.setWidgetResizable(True)
         
         # 创建预览容器
         self.preview_container = CardWidget(self.editor_card)
@@ -92,7 +113,7 @@ class MarkdownWidget(QFrame):
         self.preview_layout.addWidget(self.preview)
         
         # 添加到水平布局，各占50%宽度
-        self.hBoxLayout.addWidget(self.editor, 1)
+        self.hBoxLayout.addWidget(self.scroll_area, 1)
         self.hBoxLayout.addWidget(self.preview_container, 1)
         self.editor_layout.addWidget(self.container, 1)
         
@@ -327,28 +348,36 @@ class MarkdownWidget(QFrame):
         
         if is_dark:
             # 深色模式样式
-            self.editor.setStyleSheet("""
+            self.editor.setStyleSheet('''
                 background-color: transparent;
                 border: 1px solid transparent;
-                border-radius: 8px;
+                border-radius: 8px 0px 0px 8px;
                 padding: 10px;
                 color: #ffffff;
                 selection-background-color: rgba(100, 149, 237, 0.3);
-            """)
+            ''')
             # 调整光标宽度
             self.editor.setCursorWidth(2)
         else:
             # 浅色模式样式
-            self.editor.setStyleSheet("""
+            self.editor.setStyleSheet('''
                 background-color: transparent;
                 border: 1px solid transparent;
-                border-radius: 8px;
+                border-radius: 8px 0px 0px 8px;
                 padding: 10px;
                 color: #333333;
                 selection-background-color: rgba(100, 149, 237, 0.3);
-            """)
+            ''')
             # 调整光标宽度
             self.editor.setCursorWidth(1)
+        
+        # 确保滚动区域的样式保持正确
+        self.scroll_area.setStyleSheet('''
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+        ''')
     
     def update_preview(self):
         """
