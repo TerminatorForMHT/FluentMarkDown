@@ -1,12 +1,15 @@
-from PyQt5.QtWidgets import QTextEdit, QVBoxLayout, QFrame, QLabel, QHBoxLayout, QWidget, QStatusBar
+from PyQt5.QtWidgets import QTextEdit, QVBoxLayout, QFrame, QLabel, QHBoxLayout, QWidget, QStatusBar, QMenu, QAction
 from qfluentwidgets import (
     FluentIcon,
     CommandBar,
     TransparentPushButton,
-    CardWidget
+    CardWidget,
+    ComboBox,
+    BodyLabel
 )
 from qframelesswindow.webengine import FramelessWebEngineView
 import markdown
+from models.themes import PreviewThemes
 
 class MarkdownWidget(QFrame):
     """
@@ -16,6 +19,7 @@ class MarkdownWidget(QFrame):
         super().__init__(parent=parent)
         self.setObjectName("markdownInterface")
         self.is_fullscreen = False
+        self.preview_theme = "light"  # 默认预览框主题
         
         # 创建主布局
         self.vBoxLayout = QVBoxLayout(self)
@@ -71,19 +75,19 @@ class MarkdownWidget(QFrame):
         self.preview_container = CardWidget(self.editor_card)
         self.preview_container.setStyleSheet("""
             background-color: white;
-            border: 1px solid transparent;
-            border-radius: 0px 5px 5px 0px;
+            border: none;
+            border-radius: 0px 8px 8px 0px;
         """)
         self.preview_layout = QVBoxLayout(self.preview_container)
-        self.preview_layout.setContentsMargins(3, 3, 3, 3)
+        self.preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_layout.setSpacing(0)
         
         # 创建预览窗口
         self.preview = FramelessWebEngineView(self.preview_container)
         self.preview.setStyleSheet("""
             background-color: transparent;
-            border: 1px solid transparent;
-            border-radius: 0px 5px 5px 0px;
+            border: none;
+            border-radius: 0px 8px 8px 0px;
         """)
         self.preview_layout.addWidget(self.preview)
         
@@ -153,10 +157,84 @@ class MarkdownWidget(QFrame):
         # 分隔符
         self.command_bar.addSeparator()
         
+        # 预览主题菜单
+        self.setup_theme_menu()
+        
+        # 分隔符
+        self.command_bar.addSeparator()
+        
         # 导出
         export_button = TransparentPushButton(FluentIcon.SHARE, "导出")
         export_button.clicked.connect(self.export_file)
         self.command_bar.addWidget(export_button)
+    
+    def setup_theme_menu(self):
+        """
+        设置主题菜单
+        """
+        try:
+            # 创建主题标签
+            self.theme_label = BodyLabel("预览主题:")
+            
+            # 创建主题下拉框
+            self.theme_combo = ComboBox()
+            
+            # 添加主题选项
+            themes = PreviewThemes.get_available_themes()
+            theme_names = []
+            current_index = 0
+            for i, theme in enumerate(themes):
+                theme_info = PreviewThemes.get_theme_styles(theme)
+                theme_names.append(theme_info["name"])
+                if theme == self.preview_theme:
+                    current_index = i
+            
+            self.theme_combo.addItems(theme_names)
+            self.theme_combo.setCurrentIndex(current_index)
+            
+            # 连接索引改变信号
+            self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
+            
+            # 添加到命令栏
+            self.command_bar.addWidget(self.theme_label)
+            self.command_bar.addWidget(self.theme_combo)
+        except Exception as e:
+            print(f"Error setting up theme menu: {e}")
+    
+    def on_theme_changed(self, index):
+        """
+        主题下拉框索引改变处理
+        
+        Args:
+            index: 选中的索引
+        """
+        try:
+            themes = PreviewThemes.get_available_themes()
+            if 0 <= index < len(themes):
+                theme_name = themes[index]
+                self.set_preview_theme(theme_name)
+        except Exception as e:
+            print(f"Error changing theme: {e}")
+    
+    def set_preview_theme(self, theme_name):
+        """
+        设置预览框主题
+        
+        Args:
+            theme_name: 主题名称
+        """
+        try:
+            self.preview_theme = theme_name
+            self.update_preview()
+            
+            # 更新下拉框选中状态
+            if hasattr(self, 'theme_combo'):
+                themes = PreviewThemes.get_available_themes()
+                if theme_name in themes:
+                    index = themes.index(theme_name)
+                    self.theme_combo.setCurrentIndex(index)
+        except Exception as e:
+            print(f"Error setting theme: {e}")
     
     def open_file_dialog(self):
         """
@@ -210,10 +288,13 @@ class MarkdownWidget(QFrame):
         self.char_count_label = QLabel("字符: 0", self)
         self.selection_label = QLabel("选中: 0", self)
         self.encoding_label = QLabel("编码: UTF-8", self)
+        theme_info = PreviewThemes.get_theme_styles(self.preview_theme)
+        self.theme_label = QLabel(f"预览主题: {theme_info['name']}", self)
         
         # 添加到状态栏
         self.status_bar.addWidget(self.char_count_label)
         self.status_bar.addWidget(self.selection_label)
+        self.status_bar.addWidget(self.theme_label)
         self.status_bar.addPermanentWidget(self.encoding_label)
     
     def update_status_bar(self):
@@ -228,9 +309,14 @@ class MarkdownWidget(QFrame):
         selected_text = self.editor.textCursor().selectedText()
         selection_count = len(selected_text)
         
+        # 更新主题显示
+        theme_info = PreviewThemes.get_theme_styles(self.preview_theme)
+        theme_text = f"预览主题: {theme_info['name']}"
+        
         # 更新状态栏标签
         self.char_count_label.setText(f"字符: {char_count}")
         self.selection_label.setText(f"选中: {selection_count}")
+        self.theme_label.setText(theme_text)
     
     def update_editor_style(self):
         """
@@ -272,11 +358,19 @@ class MarkdownWidget(QFrame):
         # 确保正确处理代码块
         html = markdown.markdown(markdown_text, extensions=['fenced_code'])
         
-        # 预览框不适配深色模式，一直保持浅色样式
-        text_color = "#333333"
-        heading_color = "#2c3e50"
-        code_bg = "rgba(240, 240, 240, 0.8)"
-        blockquote_bg = "rgba(240, 240, 240, 0.5)"
+        # 获取主题样式
+        theme_styles = PreviewThemes.get_theme_styles(self.preview_theme)
+        
+        # 根据预览主题设置样式
+        background_color = theme_styles["background_color"]
+        text_color = theme_styles["text_color"]
+        heading_color = theme_styles["heading_color"]
+        code_bg = theme_styles["code_bg"]
+        blockquote_bg = theme_styles["blockquote_bg"]
+        scrollbar_track = theme_styles["scrollbar_track"]
+        scrollbar_thumb = theme_styles["scrollbar_thumb"]
+        scrollbar_thumb_hover = theme_styles["scrollbar_thumb_hover"]
+        link_color = theme_styles["link_color"]
         
         # 添加样式到预览 HTML
         styled_html = '''
@@ -285,19 +379,20 @@ class MarkdownWidget(QFrame):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 html, body {
-                    background-color: transparent;
+                    background-color: ''' + background_color + ''';
                     color: ''' + text_color + ''';
                     margin: 0;
                     padding: 0;
                     font-family: Arial, sans-serif;
                     font-size: 16px;
                     height: 100%;
+                    overflow: hidden;
                 }
                 .content {
                     padding: 20px;
                     height: 100%;
-                    overflow: hidden;
-                    background-color: transparent;
+                    overflow-y: auto;
+                    background-color: ''' + background_color + ''';
                 }
                 /* 适配Fluent Design风格的滚动条 */
                 ::-webkit-scrollbar {
@@ -305,18 +400,23 @@ class MarkdownWidget(QFrame):
                     height: 8px;
                 }
                 ::-webkit-scrollbar-track {
-                    background: #f1f1f1;
+                    background: ''' + scrollbar_track + ''';
                     border-radius: 4px;
                 }
                 ::-webkit-scrollbar-thumb {
-                    background: #c1c1c1;
+                    background: ''' + scrollbar_thumb + ''';
                     border-radius: 4px;
                 }
                 ::-webkit-scrollbar-thumb:hover {
-                    background: #a8a8a8;
+                    background: ''' + scrollbar_thumb_hover + ''';
                 }
                 h1, h2, h3, h4, h5, h6 {
                     color: ''' + heading_color + ''';
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                }
+                p {
+                    margin-bottom: 10px;
                 }
                 code {
                     background-color: ''' + code_bg + ''';
@@ -328,12 +428,37 @@ class MarkdownWidget(QFrame):
                     padding: 10px;
                     border-radius: 5px;
                     overflow-x: auto;
+                    margin: 10px 0;
                 }
                 blockquote {
                     border-left: 4px solid rgba(100, 149, 237, 0.5);
                     margin: 10px 0;
                     padding: 10px 15px;
                     background-color: ''' + blockquote_bg + ''';
+                }
+                a {
+                    color: ''' + link_color + ''';
+                    text-decoration: none;
+                }
+                a:hover {
+                    text-decoration: underline;
+                }
+                ul, ol {
+                    padding-left: 20px;
+                    margin: 10px 0;
+                }
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 10px 0;
+                }
+                th, td {
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }
+                th {
+                    background-color: ''' + code_bg + ''';
                 }
             </style>
         </head>
@@ -365,6 +490,10 @@ class MarkdownWidget(QFrame):
             content = self.editor.toPlainText()
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+    
+
+    
+
     
     def toggle_fullscreen(self):
         """

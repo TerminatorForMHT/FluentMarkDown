@@ -8,9 +8,25 @@ from qfluentwidgets import (
     isDarkTheme
 )
 from qfluentwidgets.common.config import qconfig
-from editor import MarkdownWidget
-from utils import setup_high_dpi
 import sys
+import os
+
+# 添加src目录到Python路径
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from views.markdown_editor import MarkdownWidget
+
+# 高分屏设置
+def setup_high_dpi():
+    """
+    设置高分屏支持
+    """
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtWidgets import QApplication
+    
+    # 设置Qt高DPI缩放策略
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
 class MainWindow(FluentWidget):
     """
@@ -38,6 +54,13 @@ class MainWindow(FluentWidget):
         # 窗口设置
         self.resize(1000, 700)
         self.setWindowTitle("Fluent Markdown")
+        
+        # 设置窗口图标
+        from PyQt5.QtGui import QIcon
+        import os
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "Mark.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # 连接主题变化信号
         qconfig.themeChanged.connect(self.on_theme_changed)
@@ -73,6 +96,13 @@ if __name__ == "__main__":
     
     # 创建应用
     app = QApplication(sys.argv)
+    
+    # 设置应用图标
+    from PyQt5.QtGui import QIcon
+    import os
+    icon_path = os.path.join(os.path.dirname(__file__), "..", "resources", "Mark.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     # 创建窗口
     window = MainWindow()
