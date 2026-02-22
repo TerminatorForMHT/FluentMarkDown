@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QTextEdit, QVBoxLayout, QFrame, QLabel, QHBoxLayout, QWidget, QStatusBar, QMenu, QAction
+from PyQt5.QtWidgets import QTextEdit, QVBoxLayout, QFrame, QLabel, QHBoxLayout, QWidget, QStatusBar, QMenu, QAction, QFileDialog
 from qfluentwidgets import (
     FluentIcon,
     CommandBar,
@@ -13,7 +13,16 @@ from qfluentwidgets import (
 from PyQt5.QtCore import Qt
 from qframelesswindow.webengine import FramelessWebEngineView
 import markdown
+import os
 from models.themes import PreviewThemes
+
+# 导出功能所需的库
+try:
+    from fpdf import FPDF
+    from docx import Document
+    HAS_EXPORT_LIBS = True
+except ImportError:
+    HAS_EXPORT_LIBS = False
 
 class MarkdownWidget(QFrame):
     """
@@ -50,14 +59,24 @@ class MarkdownWidget(QFrame):
         self.editor_layout.setContentsMargins(1, 1, 1, 1)
         self.editor_layout.setSpacing(0)
         
-        # 创建容器和水平布局
-        self.container = QWidget(self.editor_card)
-        self.container.setStyleSheet("background-color: transparent;")
-        self.hBoxLayout = QHBoxLayout(self.container)
-        # 确保预览框与容器边缘对齐，使用容器的圆角
-        self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
-        # 缩小编辑框和预览框之间的间距
-        self.hBoxLayout.setSpacing(0)
+        # 使用QSplitter替代QHBoxLayout，实现可调整宽度
+        from PyQt5.QtWidgets import QSplitter
+        self.splitter = QSplitter(Qt.Horizontal, self.editor_card)
+        self.splitter.setStyleSheet('''
+            QSplitter {
+                background-color: transparent;
+            }
+            QSplitter::handle {
+                width: 4px;
+                background-color: rgba(100, 149, 237, 0.3);
+            }
+            QSplitter::handle:hover {
+                background-color: rgba(100, 149, 237, 0.6);
+            }
+        ''')
+        
+        # 将分隔器添加到编辑布局
+        self.editor_layout.addWidget(self.splitter, 1)
         
         # 将编辑卡片添加到容器中
         self.card_container_layout.addWidget(self.editor_card, 1)
@@ -112,10 +131,14 @@ class MarkdownWidget(QFrame):
         """)
         self.preview_layout.addWidget(self.preview)
         
-        # 添加到水平布局，各占50%宽度
-        self.hBoxLayout.addWidget(self.scroll_area, 1)
-        self.hBoxLayout.addWidget(self.preview_container, 1)
-        self.editor_layout.addWidget(self.container, 1)
+        # 添加到分隔器，各占50%宽度
+        self.splitter.addWidget(self.scroll_area)
+        self.splitter.addWidget(self.preview_container)
+        # 设置初始大小比例
+        self.splitter.setSizes([500, 500])
+        # 设置拉伸因子，确保两边都能随窗口大小调整
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
         
         # 创建状态栏（不使用卡片容器）
         self.status_bar = QStatusBar(self)
@@ -131,9 +154,10 @@ class MarkdownWidget(QFrame):
         self.editor.textChanged.connect(self.update_preview)
         self.editor.selectionChanged.connect(self.update_status_bar)
         
-        # 初始化时更新编辑器样式
+        # 初始化时更新编辑器样式和预览
         self.update_editor_style()
         self.update_status_bar()
+        self.update_preview()
     
     def setup_command_bar(self):
         """
@@ -180,6 +204,14 @@ class MarkdownWidget(QFrame):
         
         # 预览主题菜单
         self.setup_theme_menu()
+        
+        # 分隔符
+        self.command_bar.addSeparator()
+        
+        # 插入图片
+        image_button = TransparentPushButton(FluentIcon.PHOTO, "插入图片")
+        image_button.clicked.connect(self.insert_image)
+        self.command_bar.addWidget(image_button)
         
         # 分隔符
         self.command_bar.addSeparator()
@@ -289,17 +321,239 @@ class MarkdownWidget(QFrame):
         """
         粘贴
         """
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtGui import QClipboard, QImage
+        import tempfile
+        
+        # 获取剪贴板
+        clipboard = QApplication.clipboard()
+        
+        # 检查剪贴板是否包含图片
+        if clipboard.mimeData().hasImage():
+            # 从剪贴板获取图片
+            image = clipboard.image()
+            
+            if not image.isNull():
+                # 创建临时目录
+                temp_dir = tempfile.gettempdir()
+                
+                # 生成唯一的文件名
+                import uuid
+                file_name = f"image_{uuid.uuid4().hex}.png"
+                file_path = os.path.join(temp_dir, file_name)
+                
+                # 保存图片
+                if image.save(file_path, "PNG"):
+                    # 构建Markdown图片语法
+                    markdown_image = f"![{file_name}]({file_path})"
+                    
+                    # 在当前光标位置插入图片
+                    cursor = self.editor.textCursor()
+                    cursor.insertText(markdown_image)
+                    
+                    # 更新预览
+                    self.update_preview()
+                    return
+        
+        # 如果不是图片，执行普通粘贴
         self.editor.paste()
     
     def export_file(self):
         """
         导出文件
         """
-        from PyQt5.QtWidgets import QFileDialog
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export File", "", "PDF Files (*.pdf);;Word Files (*.docx);;All Files (*)")
+        file_path, file_type = QFileDialog.getSaveFileName(
+            self, "Export File", "", 
+            "PDF Files (*.pdf);;Word Files (*.docx);;HTML Files (*.html);;All Files (*)"
+        )
         if file_path:
-            # 这里可以添加具体的导出逻辑
-            pass
+            print(f"Export path selected: {file_path}")
+            markdown_text = self.editor.toPlainText()
+            
+            # 确保文件有正确的扩展名
+            if not file_path.endswith(('.pdf', '.docx', '.html')):
+                # 根据选择的文件类型添加扩展名
+                if 'PDF Files' in file_type:
+                    file_path += '.pdf'
+                elif 'Word Files' in file_type:
+                    file_path += '.docx'
+                elif 'HTML Files' in file_type:
+                    file_path += '.html'
+            
+            print(f"Final export path: {file_path}")
+            
+            # 根据文件扩展名确定导出格式
+            ext = os.path.splitext(file_path)[1].lower()
+            print(f"Export format: {ext}")
+            
+            if ext == '.pdf':
+                self.export_to_pdf(file_path, markdown_text)
+            elif ext == '.docx':
+                self.export_to_word(file_path, markdown_text)
+            elif ext == '.html':
+                self.export_to_html(file_path, markdown_text)
+            else:
+                print(f"Unsupported format: {ext}")
+    
+    def export_to_pdf(self, file_path, markdown_text):
+        """
+        导出为PDF
+        """
+        if not HAS_EXPORT_LIBS:
+            print("Error: fpdf library not installed. Please install with 'pip install fpdf'")
+            return
+        
+        try:
+            # 创建PDF对象
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # 设置字体为支持中文的字体
+            # 注意：fpdf默认不支持中文，这里使用一种简单的方法处理
+            # 对于包含中文的文本，我们将其转换为纯文本并确保编码正确
+            pdf.set_font("Arial", size=12)
+            
+            # 转换Markdown为纯文本，并确保编码正确
+            lines = markdown_text.split('\n')
+            
+            for line in lines:
+                # 处理标题
+                if line.startswith('# '):
+                    pdf.set_font("Arial", 'B', size=16)
+                    # 尝试处理中文
+                    try:
+                        pdf.cell(200, 10, txt=line[2:], ln=True, align='L')
+                    except UnicodeEncodeError:
+                        # 如果有编码错误，尝试转换为纯文本
+                        safe_text = line[2:].encode('ascii', 'ignore').decode('ascii')
+                        pdf.cell(200, 10, txt=safe_text, ln=True, align='L')
+                    pdf.set_font("Arial", size=12)
+                elif line.startswith('## '):
+                    pdf.set_font("Arial", 'B', size=14)
+                    try:
+                        pdf.cell(200, 10, txt=line[3:], ln=True, align='L')
+                    except UnicodeEncodeError:
+                        safe_text = line[3:].encode('ascii', 'ignore').decode('ascii')
+                        pdf.cell(200, 10, txt=safe_text, ln=True, align='L')
+                    pdf.set_font("Arial", size=12)
+                elif line.startswith('### '):
+                    pdf.set_font("Arial", 'B', size=12)
+                    try:
+                        pdf.cell(200, 10, txt=line[4:], ln=True, align='L')
+                    except UnicodeEncodeError:
+                        safe_text = line[4:].encode('ascii', 'ignore').decode('ascii')
+                        pdf.cell(200, 10, txt=safe_text, ln=True, align='L')
+                    pdf.set_font("Arial", size=12)
+                else:
+                    # 普通文本
+                    try:
+                        pdf.multi_cell(200, 10, txt=line, align='L')
+                    except UnicodeEncodeError:
+                        safe_text = line.encode('ascii', 'ignore').decode('ascii')
+                        pdf.multi_cell(200, 10, txt=safe_text, align='L')
+            
+            # 保存PDF
+            pdf.output(file_path)
+            print(f"Exported to PDF: {file_path}")
+        except Exception as e:
+            print(f"Error exporting to PDF: {e}")
+    
+    def export_to_word(self, file_path, markdown_text):
+        """
+        导出为Word
+        """
+        if not HAS_EXPORT_LIBS:
+            print("Error: python-docx library not installed. Please install with 'pip install python-docx'")
+            return
+        
+        try:
+            # 创建Word文档
+            doc = Document()
+            
+            # 转换Markdown为Word格式
+            lines = markdown_text.split('\n')
+            
+            for line in lines:
+                # 处理标题
+                if line.startswith('# '):
+                    doc.add_heading(line[2:], level=1)
+                elif line.startswith('## '):
+                    doc.add_heading(line[3:], level=2)
+                elif line.startswith('### '):
+                    doc.add_heading(line[4:], level=3)
+                elif line.startswith('```'):
+                    # 代码块
+                    pass  # 简化处理
+                elif line.startswith('> '):
+                    # 引用
+                    doc.add_paragraph(line[2:], style='Intense Quote')
+                else:
+                    # 普通文本
+                    if line.strip():
+                        doc.add_paragraph(line)
+            
+            # 保存Word文档
+            doc.save(file_path)
+            print(f"Exported to Word: {file_path}")
+        except Exception as e:
+            print(f"Error exporting to Word: {e}")
+    
+    def export_to_html(self, file_path, markdown_text):
+        """
+        导出为HTML
+        """
+        try:
+            # 转换Markdown为HTML
+            html = markdown.markdown(markdown_text, extensions=['fenced_code'])
+            
+            # 添加基本HTML结构
+            full_html = '''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Markdown Export</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        line-height: 1.6;
+                        margin: 20px;
+                    }
+                    h1, h2, h3 {
+                        color: #333;
+                    }
+                    code {
+                        background-color: #f4f4f4;
+                        padding: 2px 4px;
+                        border-radius: 3px;
+                    }
+                    pre {
+                        background-color: #f4f4f4;
+                        padding: 10px;
+                        border-radius: 5px;
+                        overflow-x: auto;
+                    }
+                    blockquote {
+                        border-left: 4px solid #ddd;
+                        margin: 10px 0;
+                        padding: 10px 15px;
+                        background-color: #f9f9f9;
+                    }
+                </style>
+            </head>
+            <body>
+                ''' + html + '''
+            </body>
+            </html>
+            '''
+            
+            # 保存HTML文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(full_html)
+            
+            print(f"Exported to HTML: {file_path}")
+        except Exception as e:
+            print(f"Error exporting to HTML: {e}")
     
     def setup_status_bar(self):
         """
@@ -356,8 +610,8 @@ class MarkdownWidget(QFrame):
                 color: #ffffff;
                 selection-background-color: rgba(100, 149, 237, 0.3);
             ''')
-            # 调整光标宽度
-            self.editor.setCursorWidth(2)
+            # 调整光标宽度，使其更明显
+            self.editor.setCursorWidth(3)
         else:
             # 浅色模式样式
             self.editor.setStyleSheet('''
@@ -368,8 +622,8 @@ class MarkdownWidget(QFrame):
                 color: #333333;
                 selection-background-color: rgba(100, 149, 237, 0.3);
             ''')
-            # 调整光标宽度
-            self.editor.setCursorWidth(1)
+            # 调整光标宽度，使其更明显
+            self.editor.setCursorWidth(2)
         
         # 确保滚动区域的样式保持正确
         self.scroll_area.setStyleSheet('''
@@ -531,10 +785,119 @@ class MarkdownWidget(QFrame):
         if not self.is_fullscreen:
             # 进入全屏模式
             self.editor.hide()  # 隐藏编辑器
-            self.preview_container.show()  # 确保预览容器显示
+            
+            # 调整分隔器，让预览容器占据整个宽度
+            if hasattr(self, 'splitter'):
+                # 获取分隔器中的所有部件
+                widgets = [self.splitter.widget(i) for i in range(self.splitter.count())]
+                # 找到预览容器的索引
+                preview_index = -1
+                for i, widget in enumerate(widgets):
+                    if widget == self.preview_container:
+                        preview_index = i
+                        break
+                # 设置分隔器大小，让预览容器占据整个宽度
+                if preview_index != -1:
+                    total_width = self.splitter.width()
+                    sizes = [0] * self.splitter.count()
+                    sizes[preview_index] = total_width
+                    self.splitter.setSizes(sizes)
+            
+            # 移除所有边距，确保预览框占满整个宽度
+            if hasattr(self, 'editor_layout'):
+                self.editor_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, 'preview_layout'):
+                self.preview_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, 'card_container_layout'):
+                self.card_container_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, 'vBoxLayout'):
+                self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+            
+            # 调整预览容器样式，移除边框和圆角
+            self.preview_container.setStyleSheet("""
+                background-color: white;
+                border: none;
+                border-radius: 0px;
+            """)
+            
+            # 调整editor_card样式，移除边框
+            self.editor_card.setStyleSheet("background-color: transparent; border: none;")
+            
+            # 调整card_container样式，确保没有边距
+            if hasattr(self, 'card_container'):
+                self.card_container.setStyleSheet("background-color: transparent; padding: 0px;")
+            
+            # 强制布局更新
+            self.updateGeometry()
+            self.card_container.adjustSize()
+            self.editor_card.adjustSize()
+            self.resize(self.size())  # 强制窗口重绘
+            
             self.is_fullscreen = True
         else:
             # 退出全屏模式
+            # 显示编辑器
             self.editor.show()  # 显示编辑器
-            self.preview_container.show()  # 确保预览容器显示
+            
+            # 重置分隔器，让编辑框和预览容器平分空间
+            if hasattr(self, 'splitter'):
+                total_width = self.splitter.width()
+                half_width = total_width // 2
+                sizes = [half_width, half_width]
+                self.splitter.setSizes(sizes)
+            
+            # 恢复边距
+            if hasattr(self, 'editor_layout'):
+                self.editor_layout.setContentsMargins(1, 1, 1, 1)
+            if hasattr(self, 'preview_layout'):
+                self.preview_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, 'card_container_layout'):
+                self.card_container_layout.setContentsMargins(5, 5, 5, 5)
+            if hasattr(self, 'vBoxLayout'):
+                self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+            
+            # 恢复预览容器样式
+            self.preview_container.setStyleSheet("""
+                background-color: white;
+                border: none;
+                border-radius: 0px 8px 8px 0px;
+            """)
+            
+            # 恢复editor_card样式
+            self.editor_card.setStyleSheet("background-color: transparent;")
+            
+            # 恢复card_container样式
+            if hasattr(self, 'card_container'):
+                self.card_container.setStyleSheet("")
+            
+            # 强制布局更新
+            self.updateGeometry()
+            self.card_container.adjustSize()
+            self.editor_card.adjustSize()
+            self.resize(self.size())  # 强制窗口重绘
+            
             self.is_fullscreen = False
+    
+    def insert_image(self):
+        """
+        插入图片
+        """
+        # 打开文件对话框选择图片
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", 
+            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.svg);;All Files (*)"
+        )
+        
+        if file_path:
+            # 获取图片文件名
+            image_name = os.path.basename(file_path)
+            
+            # 构建Markdown图片语法
+            markdown_image = f"![{image_name}]({file_path})"
+            
+            # 在当前光标位置插入图片
+            cursor = self.editor.textCursor()
+            cursor.insertText(markdown_image)
+            
+            # 更新预览
+            self.update_preview()

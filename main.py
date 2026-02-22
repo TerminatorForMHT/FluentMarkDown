@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from PyQt5.QtWidgets import QApplication, QVBoxLayout
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, QSize
 from PyQt5.QtGui import QIcon
 from qfluentwidgets import (
     FluentWidget,
