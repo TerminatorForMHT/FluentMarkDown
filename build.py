@@ -13,7 +13,7 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "dist")
 # 构建目录
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 # 主入口文件
-MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "main.py")
+MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "app.py")
 # 图标文件
 ICON_FILE = os.path.join(PROJECT_ROOT, "src", "resources", "Mark.ico")
 
