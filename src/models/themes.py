@@ -2,17 +2,15 @@ class PreviewThemes:
     """
     预览窗口主题配置
     """
-    
+
     @staticmethod
     def get_theme_styles(theme_name):
         """
         获取主题样式
-        
         Args:
-            theme_name: 主题名称 (light, dark, github, solarized)
-            
+            theme_name: 主题名称 (light, dark, github, solarized, ...)
         Returns:
-            dict: 包含主题样式的字典
+            dict
         """
         themes = {
             "light": {
@@ -136,15 +134,9 @@ class PreviewThemes:
                 "link_color": "#00ffea"
             }
         }
-        
+
         return themes.get(theme_name, themes["light"])
-    
+
     @staticmethod
     def get_available_themes():
-        """
-        获取可用的主题列表
-        
-        Returns:
-            list: 主题名称列表
-        """
         return ["light", "dark", "github", "solarized", "chinese", "midnight", "forest", "ocean", "purple", "neon"]
