@@ -5,13 +5,6 @@ class PreviewThemes:
 
     @staticmethod
     def get_theme_styles(theme_name):
-        """
-        获取主题样式
-        Args:
-            theme_name: 主题名称 (light, dark, github, solarized, ...)
-        Returns:
-            dict
-        """
         themes = {
             "light": {
                 "name": "浅色",
@@ -134,7 +127,6 @@ class PreviewThemes:
                 "link_color": "#00ffea"
             }
         }
-
         return themes.get(theme_name, themes["light"])
 
     @staticmethod
