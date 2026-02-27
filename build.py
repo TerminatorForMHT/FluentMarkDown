@@ -15,7 +15,7 @@ BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 # 主入口文件
 MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "app.py")
 # 图标文件
-ICON_FILE = os.path.join(PROJECT_ROOT, "src", "resources", "Mark.ico")
+ICON_FILE = os.path.join(PROJECT_ROOT, "src", "resources", "mark.ico")
 
 
 def clean_build():

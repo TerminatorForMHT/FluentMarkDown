@@ -65,7 +65,13 @@ class MainWindow(FluentWidget):
         self.setWindowTitle("Fluent Markdown")
         
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(__file__), "src", "resources", "mark.ico")
+        import sys
+        if getattr(sys, 'frozen', False):
+            # 编译后使用PyInstaller的临时目录
+            icon_path = os.path.join(sys._MEIPASS, "src", "resources", "mark.ico")
+        else:
+            # 开发环境使用绝对路径
+            icon_path = os.path.join(os.path.dirname(__file__), "src", "resources", "mark.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
@@ -106,7 +112,13 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     # 设置应用图标
-    icon_path = os.path.join(os.path.dirname(__file__), "src", "resources", "mark.ico")
+    import sys
+    if getattr(sys, 'frozen', False):
+        # 编译后使用PyInstaller的临时目录
+        icon_path = os.path.join(sys._MEIPASS, "src", "resources", "mark.ico")
+    else:
+        # 开发环境使用绝对路径
+        icon_path = os.path.join(os.path.dirname(__file__), "src", "resources", "mark.ico")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     
