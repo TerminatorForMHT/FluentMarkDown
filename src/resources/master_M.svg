@@ -1,0 +1,94 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Shadows (ranges tightened) -->
+    <filter id="softShadow" x="240" y="170" width="640" height="720" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="20" flood-color="#050B1A" flood-opacity="0.30"/>
+    </filter>
+    <filter id="tightShadow" x="330" y="360" width="560" height="360" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#050B1A" flood-opacity="0.22"/>
+    </filter>
+
+    <!-- Acrylic noise (weaker) -->
+    <filter id="noise" x="250" y="170" width="620" height="720" filterUnits="userSpaceOnUse">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch" seed="11"/>
+      <feColorMatrix type="matrix" values="
+        1 0 0 0 0
+        0 1 0 0 0
+        0 0 1 0 0
+        0 0 0 0.10 0"/>
+    </filter>
+
+    <linearGradient id="glassFace" x1="280" y1="210" x2="780" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.48"/>
+      <stop offset="0.55" stop-color="#E8F1FF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#D7E6FF" stop-opacity="0.16"/>
+    </linearGradient>
+
+    <linearGradient id="glassEdge" x1="330" y1="820" x2="760" y2="930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9CC6FF" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.18"/>
+    </linearGradient>
+
+    <linearGradient id="strokeHi" x1="320" y1="210" x2="820" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.75"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.12"/>
+    </linearGradient>
+
+    <radialGradient id="spec" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+      gradientTransform="translate(420 290) rotate(25) scale(520 380)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="fold" x1="690" y1="250" x2="830" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#DCEBFF" stop-opacity="0.16"/>
+    </linearGradient>
+
+    <linearGradient id="ink" x1="380" y1="400" x2="820" y2="680" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1020" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#0B1020" stop-opacity="0.86"/>
+    </linearGradient>
+
+    <clipPath id="safe">
+      <rect x="40" y="40" width="944" height="944"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#safe)">
+    <g filter="url(#softShadow)">
+      <!-- Extruded edge -->
+      <path d="M332 274C332 245.49 355.49 222 384 222H648C665.673 222 682.622 229.02 695.121 241.52L781.48 327.879C793.98 340.378 801 357.327 801 375V764C801 792.51 777.51 816 749 816H384C355.49 816 332 792.51 332 764V274Z"
+        fill="url(#glassEdge)"/>
+
+      <!-- Front face -->
+      <path d="M308 250C308 221.49 331.49 198 360 198H624C641.673 198 658.622 205.02 671.121 217.52L757.48 303.879C769.98 316.378 777 333.327 777 351V740C777 768.51 753.51 792 725 792H360C331.49 792 308 768.51 308 740V250Z"
+        fill="url(#glassFace)"/>
+
+      <!-- Acrylic noise (weaker) -->
+      <path d="M308 250C308 221.49 331.49 198 360 198H624C641.673 198 658.622 205.02 671.121 217.52L757.48 303.879C769.98 316.378 777 333.327 777 351V740C777 768.51 753.51 792 725 792H360C331.49 792 308 768.51 308 740V250Z"
+        filter="url(#noise)" opacity="0.35"/>
+
+      <!-- Specular highlight -->
+      <path d="M322 270C330 232 358 214 392 210H590C640 210 676 240 690 280C616 286 540 322 478 372C416 420 370 488 346 560C328 460 312 352 322 270Z"
+        fill="url(#spec)" opacity="0.60"/>
+
+      <!-- Fold -->
+      <path d="M624 198V306C624 334.51 647.49 358 676 358H777L624 198Z"
+        fill="url(#fold)"/>
+
+      <!-- Inner stroke -->
+      <path d="M360 203H624C640.347 203 656.026 209.494 667.586 221.054L753.946 307.414C765.506 318.974 772 334.653 772 351V740C772 765.747 750.747 787 725 787H360C334.253 787 313 765.747 313 740V250C313 224.253 334.253 203 360 203Z"
+        fill="none" stroke="url(#strokeHi)" stroke-width="10"/>
+    </g>
+
+    <!-- MD mark: slightly scaled up = visually bolder -->
+    <g filter="url(#tightShadow)" transform="translate(0 0) scale(1.07) translate(-34 -26)">
+      <path d="M388 604V430C388 418.954 396.954 410 408 410H424C430.6 410 436.77 413.265 440.49 418.73L504 513L567.51 418.73C571.23 413.265 577.4 410 584 410H600C611.046 410 620 418.954 620 430V604C620 615.046 611.046 624 600 624H590C578.954 624 570 615.046 570 604V502L522 572C518.2 577.5 511.9 580.8 505 580.8C498.1 580.8 491.8 577.5 488 572L438 498V604C438 615.046 429.046 624 418 624H408C396.954 624 388 615.046 388 604Z"
+        fill="url(#ink)"/>
+      <path d="M654 430C654 418.954 662.954 410 674 410H726C784.3 410 828 452.8 828 520C828 587.2 784.3 630 726 630H674C662.954 630 654 621.046 654 610V430ZM704 460V580H726C756.8 580 778 558 778 520C778 482 756.8 460 726 460H704Z"
+        fill="url(#ink)"/>
+    </g>
+  </g>
+</svg>
