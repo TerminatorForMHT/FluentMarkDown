@@ -139,7 +139,30 @@ class MarkdownWidget(QFrame):
 
         # 状态栏
         self.status_bar = QStatusBar(self)
-        self.status_bar.setStyleSheet("background-color: transparent;")
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        if is_dark:
+            self.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: transparent;
+                    border: none;
+                    padding: 2px 8px;
+                }
+                QStatusBar::item {
+                    border: none;
+                }
+            """)
+        else:
+            self.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: transparent;
+                    border: none;
+                    padding: 2px 8px;
+                }
+                QStatusBar::item {
+                    border: none;
+                }
+            """)
         self.setup_status_bar()
 
         # 主布局装载
@@ -306,13 +329,26 @@ class MarkdownWidget(QFrame):
 
     # ---------------- 状态栏 ----------------
     def setup_status_bar(self):
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        
+        # 创建标签
         self.char_count_label = BodyLabel("字符: 0", self)
         self.selection_label = BodyLabel("选中: 0", self)
         self.encoding_label = BodyLabel("编码: UTF-8", self)
 
         theme_info = PreviewThemes.get_theme_styles(self.preview_theme)
         self.theme_label = BodyLabel(f"预览主题: {theme_info['name']}", self)
-
+        
+        # 设置标签样式，适配主题颜色并调整间距
+        text_color = "#ffffff" if is_dark else "#333333"
+        label_style = f"color: {text_color}; padding: 0 8px;"
+        self.char_count_label.setStyleSheet(label_style)
+        self.selection_label.setStyleSheet(label_style)
+        self.theme_label.setStyleSheet(label_style)
+        self.encoding_label.setStyleSheet(label_style)
+        
+        # 添加到状态栏
         self.status_bar.addWidget(self.char_count_label)
         self.status_bar.addWidget(self.selection_label)
         self.status_bar.addWidget(self.theme_label)

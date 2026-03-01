@@ -106,6 +106,39 @@ class MainWindow(FluentWidget):
         self.markdown_editor.update_editor_style()
         # 更新预览
         self.markdown_editor.update_preview()
+        # 更新状态栏样式
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        if is_dark:
+            self.markdown_editor.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: transparent;
+                    border: none;
+                    padding: 2px 8px;
+                }
+                QStatusBar::item {
+                    border: none;
+                }
+            """)
+        else:
+            self.markdown_editor.status_bar.setStyleSheet("""
+                QStatusBar {
+                    background-color: transparent;
+                    border: none;
+                    padding: 2px 8px;
+                }
+                QStatusBar::item {
+                    border: none;
+                }
+            """)
+        
+        # 更新状态栏标签颜色和间距
+        text_color = "#ffffff" if is_dark else "#333333"
+        label_style = f"color: {text_color}; padding: 0 0px;"
+        self.markdown_editor.char_count_label.setStyleSheet(label_style)
+        self.markdown_editor.selection_label.setStyleSheet(label_style)
+        self.markdown_editor.theme_label.setStyleSheet(label_style)
+        self.markdown_editor.encoding_label.setStyleSheet(label_style)
 
 
 if __name__ == "__main__":
