@@ -7,12 +7,12 @@ class PreviewThemes:
     def get_theme_styles(theme_name):
         themes = {
             "light": {
-                "name": "浅色",
+                "name": "默认",
                 "background_color": "transparent",
                 "text_color": "#333333",
                 "heading_color": "#2c3e50",
-                "code_bg": "rgba(240, 240, 240, 0.8)",
-                "blockquote_bg": "rgba(240, 240, 240, 0.5)",
+                "code_bg": "rgba(255, 255, 255, 0.8)",
+                "blockquote_bg": "rgba(255, 255, 255, 0.6)",
                 "scrollbar_track": "#f1f1f1",
                 "scrollbar_thumb": "#c1c1c1",
                 "scrollbar_thumb_hover": "#a8a8a8",

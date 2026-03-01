@@ -37,6 +37,14 @@ from qframelesswindow.webengine import FramelessWebEngineView
 
 from src.models.themes import PreviewThemes
 
+# 导出功能所需的库
+try:
+    from fpdf import FPDF
+    from docx import Document
+    HAS_EXPORT_LIBS = True
+except ImportError:
+    HAS_EXPORT_LIBS = False
+
 
 class MarkdownWidget(QFrame):
     """Markdown 编辑和预览界面"""
@@ -48,6 +56,7 @@ class MarkdownWidget(QFrame):
         self.setObjectName("markdownInterface")
         self.is_fullscreen = False
         self.preview_theme = "light"
+        self.font_size = 16  # 默认字体大小
 
         # 主布局
         self.vBoxLayout = QVBoxLayout(self)
@@ -87,6 +96,8 @@ class MarkdownWidget(QFrame):
         self.editor.setPlaceholderText("Write Markdown here...")
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 安装事件过滤器，捕获编辑器的鼠标滚轮事件
+        self.editor.installEventFilter(self)
 
         self.scroll_area = SingleDirectionScrollArea(orient=Qt.Vertical, parent=self.editor_card)
         self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
@@ -175,6 +186,26 @@ class MarkdownWidget(QFrame):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._updatePreviewRoundMask()
+    
+    def wheelEvent(self, event):
+        """处理鼠标滚轮事件，实现Ctrl+滚轮调节字体大小"""
+        from PyQt5.QtCore import Qt
+        if event.modifiers() & Qt.ControlModifier:
+            # Ctrl+滚轮调节字体大小
+            delta = event.angleDelta().y()
+            if delta > 0:
+                # 放大字体
+                self.font_size = min(self.font_size + 2, 32)  # 最大32px
+            else:
+                # 缩小字体
+                self.font_size = max(self.font_size - 2, 8)   # 最小8px
+            
+            # 更新编辑器和预览的字体大小
+            self.update_editor_style()
+            self.update_preview()
+        else:
+            # 正常滚轮事件
+            super().wheelEvent(event)
 
     # ---------------- 命令栏 ----------------
     def setup_command_bar(self):
@@ -215,6 +246,21 @@ class MarkdownWidget(QFrame):
         image_button = TransparentPushButton(FluentIcon.PHOTO, "插入图片")
         image_button.clicked.connect(self.insert_image)
         self.command_bar.addWidget(image_button)
+
+        self.command_bar.addSeparator()
+
+        # 字体大小调节
+        zoom_in_button = TransparentPushButton(FluentIcon.ZOOM_IN, "放大")
+        zoom_in_button.clicked.connect(self.zoom_in)
+        self.command_bar.addWidget(zoom_in_button)
+
+        zoom_out_button = TransparentPushButton(FluentIcon.ZOOM_OUT, "缩小")
+        zoom_out_button.clicked.connect(self.zoom_out)
+        self.command_bar.addWidget(zoom_out_button)
+
+        zoom_reset_button = TransparentPushButton(FluentIcon.HOME, "重置")
+        zoom_reset_button.clicked.connect(self.zoom_reset)
+        self.command_bar.addWidget(zoom_reset_button)
 
         self.command_bar.addSeparator()
 
@@ -285,22 +331,24 @@ class MarkdownWidget(QFrame):
         from qfluentwidgets import isDarkTheme
         is_dark = isDarkTheme()
         if is_dark:
-            self.editor.setStyleSheet('''
+            self.editor.setStyleSheet(f'''
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 8px 0px 0px 8px;
                 padding: 10px;
                 color: #ffffff;
+                font-size: {self.font_size}px;
                 selection-background-color: rgba(100, 149, 237, 0.3);
             ''')
             self.editor.setCursorWidth(3)
         else:
-            self.editor.setStyleSheet('''
+            self.editor.setStyleSheet(f'''
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 8px 0px 0px 8px;
                 padding: 10px;
                 color: #333333;
+                font-size: {self.font_size}px;
                 selection-background-color: rgba(100, 149, 237, 0.3);
             ''')
             self.editor.setCursorWidth(2)
@@ -310,16 +358,45 @@ class MarkdownWidget(QFrame):
         md_text = self.editor.toPlainText()
         html = markdown.markdown(md_text, extensions=['fenced_code'])
 
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+
         ts = PreviewThemes.get_theme_styles(self.preview_theme)
         bg = ts["background_color"]  # light=transparent -> 透出 Mica
-        text_color = ts["text_color"]
-        heading_color = ts["heading_color"]
-        code_bg = ts["code_bg"]
-        blockquote_bg = ts["blockquote_bg"]
-        scrollbar_track = ts["scrollbar_track"]
-        scrollbar_thumb = ts["scrollbar_thumb"]
-        scrollbar_thumb_hover = ts["scrollbar_thumb_hover"]
-        link_color = ts["link_color"]
+        
+        # 为默认主题添加系统主题适配
+        if self.preview_theme == "light":
+            if is_dark:
+                # 深色系统主题下的默认主题配置
+                text_color = "#e0e0e0"
+                heading_color = "#ffffff"
+                code_bg = "rgba(255, 255, 255, 0.1)"
+                blockquote_bg = "rgba(255, 255, 255, 0.05)"
+                scrollbar_track = "#3d3d3d"
+                scrollbar_thumb = "#5d5d5d"
+                scrollbar_thumb_hover = "#7d7d7d"
+                link_color = "#64b5f6"
+            else:
+                # 浅色系统主题下的默认主题配置
+                text_color = ts["text_color"]
+                heading_color = ts["heading_color"]
+                code_bg = ts["code_bg"]
+                blockquote_bg = ts["blockquote_bg"]
+                scrollbar_track = ts["scrollbar_track"]
+                scrollbar_thumb = ts["scrollbar_thumb"]
+                scrollbar_thumb_hover = ts["scrollbar_thumb_hover"]
+                link_color = ts["link_color"]
+        else:
+            # 其他主题使用原有配置
+            text_color = ts["text_color"]
+            heading_color = ts["heading_color"]
+            code_bg = ts["code_bg"]
+            blockquote_bg = ts["blockquote_bg"]
+            scrollbar_track = ts["scrollbar_track"]
+            scrollbar_thumb = ts["scrollbar_thumb"]
+            scrollbar_thumb_hover = ts["scrollbar_thumb_hover"]
+            link_color = ts["link_color"]
+        
         r = self.PREVIEW_RADIUS
 
         # 关键点：
@@ -327,74 +404,152 @@ class MarkdownWidget(QFrame):
         # - .content 用主题 bg（浅色 transparent 直接透出 Mica；其他主题为实色）
         # - .content 负责圆角裁剪（overflow:hidden）
         # - .scroll 负责滚动，避免底部显示不全
-        styled_html = f"""
+        # 使用字符串拼接构建HTML模板，避免f-string语法冲突
+        styled_html = '''
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-  html, body {{
+  html, body {
     margin: 0;
     padding: 0;
     height: 100%;
     overflow: hidden;
     background: transparent !important;
-    color: {text_color};
+    color: ''' + text_color + ''';
     font-family: Arial, sans-serif;
-    font-size: 16px;
-  }}
+    font-size: ''' + str(self.font_size) + '''px;
+  }
 
-  .content {{
+  .content {
     height: 100%;
-    background: {bg};
-    border-top-right-radius: {r}px;
-    border-bottom-right-radius: {r}px;
+    background: ''' + bg + ''';
+    border-top-right-radius: ''' + str(r) + '''px;
+    border-bottom-right-radius: ''' + str(r) + '''px;
     overflow: hidden;
-  }}
+  }
 
-  .scroll {{
+  .scroll {
     height: 100%;
     overflow-y: auto;
     box-sizing: border-box;
     padding: 20px 20px 36px 20px;
-  }}
+  }
 
-  ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
-  ::-webkit-scrollbar-track {{ background: {scrollbar_track}; border-radius: 4px; }}
-  ::-webkit-scrollbar-thumb {{ background: {scrollbar_thumb}; border-radius: 4px; }}
-  ::-webkit-scrollbar-thumb:hover {{ background: {scrollbar_thumb_hover}; }}
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: ''' + scrollbar_track + '''; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: ''' + scrollbar_thumb + '''; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: ''' + scrollbar_thumb_hover + '''; }
 
-  h1,h2,h3,h4,h5,h6 {{ color: {heading_color}; margin: 20px 0 10px; }}
-  p {{ margin: 0 0 10px; }}
+  h1,h2,h3,h4,h5,h6 { color: ''' + heading_color + '''; margin: 20px 0 10px; }
+  p { margin: 0 0 10px; }
 
-  code {{ background: {code_bg}; padding: 2px 4px; border-radius: 3px; }}
-  pre {{ background: {code_bg}; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; }}
+  code { background: ''' + code_bg + '''; padding: 2px 4px; border-radius: 3px; color: ''' + text_color + '''; }
+  pre { position: relative; background: ''' + code_bg + '''; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; color: ''' + text_color + '''; }
+  pre code { background: transparent; padding: 0; border-radius: 0; }
+  .copy-button { position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: ''' + text_color + '''; }
+  .copy-button:hover { background: rgba(255,255,255,0.3); }
+  .copy-button.copied { background: rgba(76,175,80,0.7); color: white; }
 
-  blockquote {{
+  blockquote {
     border-left: 4px solid rgba(100,149,237,0.5);
     margin: 10px 0;
     padding: 10px 15px;
-    background: {blockquote_bg};
-  }}
+    background: ''' + blockquote_bg + ''';
+  }
 
-  a {{ color: {link_color}; text-decoration: none; }}
-  a:hover {{ text-decoration: underline; }}
+  a { color: ''' + link_color + '''; text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
-  table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
-  th, td {{ border: 1px solid rgba(0,0,0,0.12); padding: 8px; text-align: left; }}
-  th {{ background: {code_bg}; }}
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid rgba(0,0,0,0.12); padding: 8px; text-align: left; }
+  th { background: ''' + code_bg + '''; }
 </style>
 </head>
 <body>
   <div class="content">
     <div class="scroll">
-      {html}
+      ''' + html + '''
     </div>
   </div>
 </body>
+<script>
+  // 为每个代码块添加复制按钮
+  document.addEventListener("DOMContentLoaded", function() {
+    var preElements = document.querySelectorAll("pre");
+    preElements.forEach(function(pre) {
+      // 创建复制按钮
+      var copyButton = document.createElement("button");
+      copyButton.className = "copy-button";
+      copyButton.textContent = "复制";
+      
+      // 添加到代码块
+      pre.appendChild(copyButton);
+      
+      // 复制功能
+      copyButton.addEventListener("click", function() {
+        var code = pre.querySelector("code");
+        if (code) {
+          var text = code.textContent;
+          try {
+            // 备用方法：创建临时文本域并复制（优先使用，避免剪贴板API的沙盒限制）
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            var success = document.execCommand("copy");
+            if (success) {
+              copyButton.textContent = "已复制";
+              copyButton.classList.add("copied");
+              setTimeout(function() {
+                copyButton.textContent = "复制";
+                copyButton.classList.remove("copied");
+              }, 2000);
+            } else {
+              throw new Error("复制失败");
+            }
+          } catch (err) {
+            // 尝试使用剪贴板API作为备用
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              navigator.clipboard.writeText(text).then(function() {
+                copyButton.textContent = "已复制";
+                copyButton.classList.add("copied");
+                setTimeout(function() {
+                  copyButton.textContent = "复制";
+                  copyButton.classList.remove("copied");
+                }, 2000);
+              }).catch(function() {
+                copyButton.textContent = "复制失败";
+                setTimeout(function() {
+                  copyButton.textContent = "复制";
+                }, 2000);
+              });
+            } else {
+              copyButton.textContent = "复制失败";
+              setTimeout(function() {
+                copyButton.textContent = "复制";
+              }, 2000);
+            }
+          } finally {
+            // 清理临时元素
+            var textArea = document.querySelector("textarea[style*='-999999px']");
+            if (textArea) {
+              document.body.removeChild(textArea);
+            }
+          }
+        }
+      });
+    });
+  });
+</script>
 </html>
-"""
+'''
         self.preview.setHtml(styled_html)
         self._updatePreviewRoundMask()
         self.update_status_bar()
@@ -467,6 +622,44 @@ class MarkdownWidget(QFrame):
             self.is_fullscreen = False
 
         self._updatePreviewRoundMask()
+    
+    def zoom_in(self):
+        """放大字体"""
+        self.font_size = min(self.font_size + 2, 32)  # 最大32px
+        self.update_editor_style()
+        self.update_preview()
+    
+    def zoom_out(self):
+        """缩小字体"""
+        self.font_size = max(self.font_size - 2, 8)   # 最小8px
+        self.update_editor_style()
+        self.update_preview()
+    
+    def zoom_reset(self):
+        """重置字体大小"""
+        self.font_size = 16  # 恢复默认字体大小
+        self.update_editor_style()
+        self.update_preview()
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器，用于捕获编辑器的鼠标滚轮事件"""
+        from PyQt5.QtCore import Qt, QEvent
+        if obj == self.editor and event.type() == QEvent.Wheel:
+            if event.modifiers() & Qt.ControlModifier:
+                # Ctrl+滚轮调节字体大小
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    # 放大字体
+                    self.font_size = min(self.font_size + 2, 32)  # 最大32px
+                else:
+                    # 缩小字体
+                    self.font_size = max(self.font_size - 2, 8)   # 最小8px
+                
+                # 更新编辑器和预览的字体大小
+                self.update_editor_style()
+                self.update_preview()
+                return True  # 事件已处理
+        return False  # 事件未处理，传递给其他处理者
 
     # ---------------- 导出（保持原逻辑，略） ----------------
     def export_file(self):
