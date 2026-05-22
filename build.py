@@ -5,6 +5,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -14,8 +15,13 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "dist")
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 # 主入口文件
 MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "app.py")
-# 图标文件
-ICON_FILE = os.path.join(PROJECT_ROOT, "src", "resources", "mark.ico")
+# 图标文件：按平台选用
+#   macOS  -> AppIcon.icns（squircle 圆角）
+#   Windows-> mark.ico（Fluent 规范，不裁切）
+if sys.platform == "darwin":
+    ICON_FILE = os.path.join(PROJECT_ROOT, "resources", "AppIcon.icns")
+else:
+    ICON_FILE = os.path.join(PROJECT_ROOT, "resources", "mark.ico")
 
 
 def clean_build():
@@ -35,7 +41,9 @@ def build_exe():
     import sys
     python_exe = sys.executable
     
-    # 构建PyInstaller命令，使用虚拟环境内的Python来运行PyInstaller
+    # PyInstaller 在 Windows 用 ';' 分隔 add-data，其它平台用 ':'
+    data_sep = ";" if sys.platform.startswith("win") else ":"
+
     cmd = [
         python_exe,
         "-m", "PyInstaller",
@@ -43,12 +51,12 @@ def build_exe():
         "--onefile",
         "--windowed",
         "--icon", ICON_FILE,
-        "--add-data", f"src/resources;src/resources",
+        "--add-data", f"resources{data_sep}resources",
         "--collect-submodules", "views",
         "--collect-submodules", "controllers",
         "--collect-submodules", "models",
-        "--collect-submodules", "src",
-        MAIN_SCRIPT
+        "--collect-submodules", "qfluentwidgets",
+        MAIN_SCRIPT,
     ]
     
     print(f"执行命令: {' '.join(cmd)}")
@@ -57,8 +65,9 @@ def build_exe():
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     
     if result.returncode == 0:
+        exe_name = "FluentMarkdown.exe" if sys.platform.startswith("win") else "FluentMarkdown"
         print("编译成功！")
-        print(f"可执行文件位于: {os.path.join(OUTPUT_DIR, 'FluentMarkdown.exe')}")
+        print(f"可执行文件位于: {os.path.join(OUTPUT_DIR, exe_name)}")
     else:
         print("编译失败！")
         return False

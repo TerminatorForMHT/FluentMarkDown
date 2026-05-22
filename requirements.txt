@@ -1,6 +1,11 @@
 PyQt5
 pyqtwebengine
 markdown
-pyqt-fluent-widgets
+PyQt-Fluent-Widgets[full]
 fpdf
 python-docx
+# 图标构建脚本依赖（scripts/build_icons.py）
+# 注：SVG 渲染直接用 PyQt5.QtSvg.QSvgRenderer，无需额外的 cairosvg
+Pillow
+# macOS：源码启动时把 Dock 图标替换为我们自己的 .icns（pip 会按平台自动选装）
+pyobjc-framework-Cocoa; sys_platform == "darwin"
