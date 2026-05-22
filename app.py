@@ -52,7 +52,7 @@ def main() -> int:
             _apply_macos_dock_icon(icon_path)
 
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     if hasattr(window, 'windowEffect') and window.windowEffect is not None:
         window.windowEffect.setMicaEffect(window.winId(), isDarkTheme())
