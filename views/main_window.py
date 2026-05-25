@@ -30,6 +30,7 @@ from qfluentwidgets import (
     Action,
     FluentIcon,
     FluentWidget,
+    RoundMenu,
     SystemThemeListener,
     Theme,
     isDarkTheme,
@@ -119,8 +120,7 @@ class MainWindow(FluentWidget):
         # 命令栏（依赖 tab_controller / theme_controller 已就绪）
         self._build_command_bar()
 
-        # 启动一个初始 tab
-        self.tab_controller.new_document()
+        # 不自动创建初始 tab，等用户主动新建/打开
 
         # 跨 tab 同步：主题 + 状态栏
         self.theme_controller.previewThemeChanged.connect(self._on_preview_theme_changed)
@@ -152,6 +152,8 @@ class MainWindow(FluentWidget):
 
         cb.addAction(Action(FluentIcon.ADD, "新建", triggered=self.tab_controller.new_document))
         cb.addAction(Action(FluentIcon.FOLDER, "打开", triggered=self.tab_controller.open_document))
+        self._recent_action = Action(FluentIcon.HISTORY, "最近文件", triggered=self._do_show_recent_menu)
+        cb.addAction(self._recent_action)
         cb.addAction(Action(FluentIcon.SAVE, "保存", triggered=self.tab_controller.save_current))
         cb.addAction(Action(FluentIcon.SAVE_AS, "另存为", triggered=self.tab_controller.save_current_as))
         cb.addSeparator()
@@ -312,6 +314,37 @@ class MainWindow(FluentWidget):
             duration=2500,
             parent=self,
         )
+
+    # ---------------- 最近文件 ----------------
+    def _do_show_recent_menu(self) -> None:
+        recent = self.tab_controller.recent_files.recent_files
+        menu = RoundMenu("", self)
+
+        if not recent:
+            action = Action("暂无记录")
+            action.setEnabled(False)
+            menu.addAction(action)
+        else:
+            for path in recent[:10]:
+                display = os.path.basename(path)
+                action = Action(display)
+                action.setToolTip(path)
+                action.triggered.connect(
+                    lambda checked, p=path: self.tab_controller.open_file_by_path(p)
+                )
+                menu.addAction(action)
+            menu.addSeparator()
+            clear_action = Action("清空历史记录")
+            clear_action.triggered.connect(self.tab_controller.recent_files.clear)
+            menu.addAction(clear_action)
+
+        # 在按钮下方弹出
+        button = self.command_bar.widgetForAction(self._recent_action)
+        if button:
+            pos = button.mapToGlobal(button.rect().bottomLeft())
+        else:
+            pos = self.command_bar.mapToGlobal(self.command_bar.rect().bottomLeft())
+        menu.exec_(pos)
 
     # ---------------- 主题联动 ----------------
     def _on_theme_combo_changed(self, index: int) -> None:
