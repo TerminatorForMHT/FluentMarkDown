@@ -120,7 +120,8 @@ class MainWindow(FluentWidget):
         # 命令栏（依赖 tab_controller / theme_controller 已就绪）
         self._build_command_bar()
 
-        # 不自动创建初始 tab，等用户主动新建/打开
+        # 恢复上次退出时未关闭的 tab
+        self.tab_controller.restore_session()
 
         # 跨 tab 同步：主题 + 状态栏
         self.theme_controller.previewThemeChanged.connect(self._on_preview_theme_changed)
@@ -154,24 +155,34 @@ class MainWindow(FluentWidget):
         cb.addAction(Action(FluentIcon.FOLDER, "打开", triggered=self.tab_controller.open_document))
         self._recent_action = Action(FluentIcon.HISTORY, "最近文件", triggered=self._do_show_recent_menu)
         cb.addAction(self._recent_action)
-        cb.addAction(Action(FluentIcon.SAVE, "保存", triggered=self.tab_controller.save_current))
-        cb.addAction(Action(FluentIcon.SAVE_AS, "另存为", triggered=self.tab_controller.save_current_as))
+        self._save_action = Action(FluentIcon.SAVE, "保存", triggered=self.tab_controller.save_current)
+        self._save_as_action = Action(FluentIcon.SAVE_AS, "另存为", triggered=self.tab_controller.save_current_as)
+        cb.addAction(self._save_action)
+        cb.addAction(self._save_as_action)
         cb.addSeparator()
 
-        cb.addAction(Action(FluentIcon.COPY, "复制", triggered=self._do_copy))
-        cb.addAction(Action(FluentIcon.PASTE, "粘贴", triggered=self._do_paste))
+        self._copy_action = Action(FluentIcon.COPY, "复制", triggered=self._do_copy)
+        self._paste_action = Action(FluentIcon.PASTE, "粘贴", triggered=self._do_paste)
+        cb.addAction(self._copy_action)
+        cb.addAction(self._paste_action)
         cb.addSeparator()
 
-        cb.addAction(Action(FluentIcon.PHOTO, "插入图片", triggered=self._do_insert_image))
-        cb.addAction(Action(FluentIcon.VIEW, "全屏阅读", triggered=self._do_toggle_fullscreen))
+        self._insert_image_action = Action(FluentIcon.PHOTO, "插入图片", triggered=self._do_insert_image)
+        self._fullscreen_action = Action(FluentIcon.VIEW, "全屏阅读", triggered=self._do_toggle_fullscreen)
+        cb.addAction(self._insert_image_action)
+        cb.addAction(self._fullscreen_action)
         cb.addSeparator()
 
-        cb.addAction(Action(FluentIcon.ZOOM_IN, "放大", triggered=self._do_zoom_in))
-        cb.addAction(Action(FluentIcon.ZOOM_OUT, "缩小", triggered=self._do_zoom_out))
-        cb.addAction(Action(FluentIcon.SYNC, "重置", triggered=self._do_zoom_reset))
+        self._zoom_in_action = Action(FluentIcon.ZOOM_IN, "放大", triggered=self._do_zoom_in)
+        self._zoom_out_action = Action(FluentIcon.ZOOM_OUT, "缩小", triggered=self._do_zoom_out)
+        self._zoom_reset_action = Action(FluentIcon.SYNC, "重置", triggered=self._do_zoom_reset)
+        cb.addAction(self._zoom_in_action)
+        cb.addAction(self._zoom_out_action)
+        cb.addAction(self._zoom_reset_action)
         cb.addSeparator()
 
-        cb.addWidget(BodyLabel("预览主题:"))
+        self._theme_label = BodyLabel("预览主题:")
+        cb.addWidget(self._theme_label)
         self.theme_combo = ComboBox()
         themes = self.theme_controller.available_themes()
         for key in themes:
@@ -183,7 +194,19 @@ class MainWindow(FluentWidget):
         cb.addWidget(self.theme_combo)
         cb.addSeparator()
 
-        cb.addAction(Action(FluentIcon.SHARE, "导出", triggered=self._do_export))
+        self._export_action = Action(FluentIcon.SHARE, "导出", triggered=self._do_export)
+        cb.addAction(self._export_action)
+
+        # 收集需要有文档才生效的 action
+        self._editor_actions = [
+            self._save_action, self._save_as_action,
+            self._copy_action, self._paste_action,
+            self._insert_image_action, self._fullscreen_action,
+            self._zoom_in_action, self._zoom_out_action, self._zoom_reset_action,
+            self._export_action,
+        ]
+        # 初始状态：无文档，禁用
+        self._update_editor_actions_enabled(False)
 
     # ---------------- 状态栏 ----------------
     def _build_status_bar(self) -> None:
@@ -338,13 +361,8 @@ class MainWindow(FluentWidget):
             clear_action.triggered.connect(self.tab_controller.recent_files.clear)
             menu.addAction(clear_action)
 
-        # 在按钮下方弹出
-        button = self.command_bar.widgetForAction(self._recent_action)
-        if button:
-            pos = button.mapToGlobal(button.rect().bottomLeft())
-        else:
-            pos = self.command_bar.mapToGlobal(self.command_bar.rect().bottomLeft())
-        menu.exec_(pos)
+        from PyQt5.QtGui import QCursor
+        menu.exec_(QCursor.pos())
 
     # ---------------- 主题联动 ----------------
     def _on_theme_combo_changed(self, index: int) -> None:
@@ -357,7 +375,16 @@ class MainWindow(FluentWidget):
             editor.set_preview_theme(theme_key)
         self._refresh_status_bar()
 
+    def _update_editor_actions_enabled(self, enabled: bool) -> None:
+        for action in self._editor_actions:
+            action.setEnabled(enabled)
+        self.theme_combo.setEnabled(enabled)
+        self._theme_label.setEnabled(enabled)
+
     def _on_current_document_changed(self, document: Optional[Document]) -> None:
+        has_doc = document is not None
+        self._update_editor_actions_enabled(has_doc)
+
         editor = self._current_editor()
         if editor is not None:
             try:
@@ -386,6 +413,7 @@ class MainWindow(FluentWidget):
 
     # ---------------- 生命周期 ----------------
     def closeEvent(self, e):
+        self.tab_controller.save_session()
         self.theme_listener.terminate()
         self.theme_listener.deleteLater()
         super().closeEvent(e)
