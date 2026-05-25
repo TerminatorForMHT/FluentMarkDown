@@ -1,11 +1,12 @@
 """
-最近打开文件的历史记录管理。
+历史记录与会话恢复管理。
 
-持久化到 ~/.fluentmarkdown/recent_files.json，记录最近打开/保存过的文件路径。
+- RecentFilesManager: 最近打开文件列表，持久化到 ~/.fluentmarkdown/recent_files.json
+- SessionManager: 上次退出时未关闭的 tab 状态，持久化到 ~/.fluentmarkdown/session.json
 """
 import json
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
@@ -70,5 +71,53 @@ class RecentFilesManager(QObject):
         try:
             with open(self._HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(self._recent_files, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+
+class SessionManager:
+    """退出时保存打开的 tab 状态，下次启动时恢复。
+
+    持久化到 ~/.fluentmarkdown/session.json，结构：
+    {
+      "tabs": [
+        {"file_path": "/path/to/file.md", "content": null, "is_modified": false},
+        {"file_path": null, "content": "未保存的文本...", "is_modified": true}
+      ],
+      "active_index": 0
+    }
+    """
+
+    _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".fluentmarkdown")
+    _SESSION_FILE = os.path.join(_CONFIG_DIR, "session.json")
+
+    def save_session(self, tabs: List[Dict[str, Any]], active_index: int) -> None:
+        """保存当前会话状态。"""
+        data = {"tabs": tabs, "active_index": active_index}
+        os.makedirs(self._CONFIG_DIR, exist_ok=True)
+        try:
+            with open(self._SESSION_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    def load_session(self) -> Optional[Dict[str, Any]]:
+        """加载上次的会话状态，不存在或格式错误返回 None。"""
+        if not os.path.exists(self._SESSION_FILE):
+            return None
+        try:
+            with open(self._SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "tabs" in data:
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
+    def clear_session(self) -> None:
+        """清除会话文件。"""
+        try:
+            if os.path.exists(self._SESSION_FILE):
+                os.remove(self._SESSION_FILE)
         except OSError:
             pass
