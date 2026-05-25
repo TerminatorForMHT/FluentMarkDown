@@ -4,6 +4,7 @@
 每个 tab 对应一个 (Document, MarkdownEditorView) 配对。
 新建/打开/关闭/切换 tab 的全部逻辑都在这里。
 """
+import os
 import uuid
 from typing import Dict, List, Optional
 
@@ -14,6 +15,7 @@ from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox, TabBar
 
 from controllers.document_controller import DocumentController
 from models.document import Document
+from models.history import RecentFilesManager, SessionManager
 from views.markdown_editor import MarkdownEditorView
 
 
@@ -40,6 +42,9 @@ class TabController(QObject):
         self._editors: Dict[str, MarkdownEditorView] = {}
         self._documents: Dict[str, Document] = {}
 
+        self.recent_files = RecentFilesManager(self)
+        self._session = SessionManager()
+
         self._setup_tab_bar()
 
     # ---------------- TabBar 初始化 ----------------
@@ -51,9 +56,8 @@ class TabController(QObject):
             "#33000000", "#33ffffff"
         )
         self._tab_bar.setScrollable(True)
-        self._tab_bar.setAddButtonVisible(True)
+        self._tab_bar.setAddButtonVisible(False)
 
-        self._tab_bar.tabAddRequested.connect(self.new_document)
         self._tab_bar.tabCloseRequested.connect(self._on_tab_close_requested)
         self._tab_bar.currentChanged.connect(self._on_current_changed)
 
@@ -62,6 +66,24 @@ class TabController(QObject):
         """新建一个空白文档 tab。"""
         doc = Document(parent=self)
         self._add_tab(doc)
+
+    def open_file_by_path(self, path: str) -> None:
+        """直接按路径打开文件（供最近文件列表调用）。"""
+        if not path:
+            return
+        for route_key, document in self._documents.items():
+            if document.file_path == path:
+                self._tab_bar.setCurrentTab(route_key)
+                return
+        doc = Document(parent=self)
+        try:
+            self._docs.open_into(doc, path)
+        except Exception as err:  # noqa: BLE001
+            self._show_error("打开失败", str(err))
+            self.recent_files.remove(path)
+            return
+        self._add_tab(doc)
+        self.recent_files.add(path)
 
     def open_document(self) -> None:
         """弹对话框选择文件并在新 tab 中打开。"""
@@ -82,6 +104,7 @@ class TabController(QObject):
             self._show_error("打开失败", str(err))
             return
         self._add_tab(doc)
+        self.recent_files.add(path)
 
     def save_current(self) -> None:
         doc, _ = self._current_pair()
@@ -95,6 +118,7 @@ class TabController(QObject):
         if saved_path:
             self._sync_tab_title(self._current_route_key())
             self._show_success("保存成功", saved_path)
+            self.recent_files.add(saved_path)
 
     def save_current_as(self) -> None:
         doc, _ = self._current_pair()
@@ -108,6 +132,7 @@ class TabController(QObject):
         if saved_path:
             self._sync_tab_title(self._current_route_key())
             self._show_success("已另存为", saved_path)
+            self.recent_files.add(saved_path)
 
     def current_editor(self) -> Optional[MarkdownEditorView]:
         return self._current_pair()[1]
@@ -134,6 +159,8 @@ class TabController(QObject):
             onClick=lambda rk=route_key: self._activate_by_route(rk),
         )
         self._tab_bar.setCurrentTab(route_key)
+        self._stack.setCurrentWidget(editor)
+        self.currentDocumentChanged.emit(document)
 
         document.modifiedChanged.connect(
             lambda _modified, rk=route_key: self._sync_tab_title(rk)
@@ -190,8 +217,10 @@ class TabController(QObject):
         self._tab_bar.removeTabByKey(route_key)
 
         if self._tab_bar.count() == 0:
-            # 始终保留至少一个空白 tab，避免编辑区出现“真空”
-            self.new_document()
+            # 切回欢迎页（welcome_page 始终是 stack 的第一个 widget）
+            if self._stack.count() > 0:
+                self._stack.setCurrentIndex(0)
+            self.currentDocumentChanged.emit(None)
 
     def _current_route_key(self) -> Optional[str]:
         index = self._tab_bar.currentIndex()
@@ -252,3 +281,75 @@ class TabController(QObject):
             duration=2500,
             parent=self._host.window(),
         )
+
+    # ---------------- 会话保存/恢复 ----------------
+    def save_session(self) -> None:
+        """保存当前所有 tab 的状态，供下次启动恢复。"""
+        tabs = []
+        for route_key in self._iter_route_keys():
+            doc = self._documents.get(route_key)
+            if doc is None:
+                continue
+            tab_info = {
+                "file_path": doc.file_path,
+                "content": doc.content if doc.is_untitled or doc.is_modified else None,
+                "is_modified": doc.is_modified,
+            }
+            tabs.append(tab_info)
+
+        active_index = self._tab_bar.currentIndex()
+        self._session.save_session(tabs, active_index)
+
+    def restore_session(self) -> bool:
+        """恢复上次退出时的 tab 状态。成功恢复至少一个 tab 返回 True。"""
+        session = self._session.load_session()
+        if not session:
+            return False
+
+        tabs = session.get("tabs", [])
+        if not tabs:
+            return False
+
+        restored = False
+        for tab_info in tabs:
+            file_path = tab_info.get("file_path")
+            content = tab_info.get("content")
+            is_modified = tab_info.get("is_modified", False)
+
+            doc = Document(parent=self)
+            if file_path and os.path.isfile(file_path):
+                try:
+                    doc.load(file_path)
+                    # 如果关闭时有未保存的修改，用保存的内容覆盖
+                    if is_modified and content is not None:
+                        doc.set_content(content, mark_modified=True)
+                except Exception:  # noqa: BLE001
+                    continue
+            elif content is not None:
+                # 未命名文档：恢复内容
+                doc.set_content(content, mark_modified=True)
+            else:
+                continue
+
+            self._add_tab(doc)
+            restored = True
+
+        # 恢复激活的 tab
+        if restored:
+            active_index = session.get("active_index", 0)
+            count = self._tab_bar.count()
+            if 0 <= active_index < count:
+                item = self._tab_bar.tabItem(active_index)
+                if item:
+                    self._tab_bar.setCurrentTab(item.routeKey())
+
+        return restored
+
+    def _iter_route_keys(self) -> List[str]:
+        """按 tab 顺序返回所有 routeKey。"""
+        keys = []
+        for i in range(self._tab_bar.count()):
+            item = self._tab_bar.tabItem(i)
+            if item:
+                keys.append(item.routeKey())
+        return keys
