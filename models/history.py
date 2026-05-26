@@ -75,6 +75,43 @@ class RecentFilesManager(QObject):
             pass
 
 
+class SettingsManager:
+    """简单的应用设置持久化（~/.fluentmarkdown/settings.json）。"""
+
+    _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".fluentmarkdown")
+    _SETTINGS_FILE = os.path.join(_CONFIG_DIR, "settings.json")
+
+    def __init__(self):
+        self._data: Dict[str, Any] = {}
+        self._load()
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+        self._save()
+
+    def _load(self) -> None:
+        if not os.path.exists(self._SETTINGS_FILE):
+            return
+        try:
+            with open(self._SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                self._data = data
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def _save(self) -> None:
+        os.makedirs(self._CONFIG_DIR, exist_ok=True)
+        try:
+            with open(self._SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+
 class SessionManager:
     """退出时保存打开的 tab 状态，下次启动时恢复。
 
