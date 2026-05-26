@@ -60,6 +60,7 @@ class TabController(QObject):
 
         self._tab_bar.tabCloseRequested.connect(self._on_tab_close_requested)
         self._tab_bar.currentChanged.connect(self._on_current_changed)
+        self._tab_bar.tabMoved.connect(self._on_tab_moved)
 
     # ---------------- 外部 API ----------------
     def new_document(self) -> None:
@@ -174,6 +175,10 @@ class TabController(QObject):
         if editor:
             self._stack.setCurrentWidget(editor)
             self.currentDocumentChanged.emit(self._documents.get(route_key))
+
+    def _on_tab_moved(self, from_index: int, to_index: int) -> None:
+        """Tab 被拖拽排序后，自动保存 session 以持久化新顺序。"""
+        self.save_session()
 
     def _on_current_changed(self, index: int) -> None:
         if index < 0 or index >= self._tab_bar.count():
