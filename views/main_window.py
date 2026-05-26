@@ -15,10 +15,11 @@ import uuid
 from typing import Optional
 
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
+    QShortcut,
     QStatusBar,
     QVBoxLayout,
 )
@@ -43,6 +44,7 @@ from controllers.export_controller import ExportController
 from controllers.tab_controller import TabController
 from controllers.theme_controller import ThemeController
 from models.document import Document
+from models.history import SettingsManager
 from views.tab_container import TabContainer
 
 
@@ -79,6 +81,7 @@ class MainWindow(FluentWidget):
     def __init__(self):
         super().__init__()
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAcceptDrops(True)
 
         setTheme(Theme.AUTO)
         self.theme_listener = SystemThemeListener(self)
@@ -87,6 +90,7 @@ class MainWindow(FluentWidget):
         self.document_controller = DocumentController(self)
         self.export_controller = ExportController(self)
         self.theme_controller = ThemeController("light", self)
+        self.settings = SettingsManager()
 
         # 布局
         self.main_layout = QVBoxLayout(self)
@@ -120,12 +124,12 @@ class MainWindow(FluentWidget):
         # 命令栏（依赖 tab_controller / theme_controller 已就绪）
         self._build_command_bar()
 
-        # 恢复上次退出时未关闭的 tab
-        self.tab_controller.restore_session()
-
-        # 跨 tab 同步：主题 + 状态栏
+        # 跨 tab 同步：主题 + 状态栏（必须在 restore_session 之前连接，否则恢复时按钮不会启用）
         self.theme_controller.previewThemeChanged.connect(self._on_preview_theme_changed)
         self.tab_controller.currentDocumentChanged.connect(self._on_current_document_changed)
+
+        # 恢复上次退出时未关闭的 tab
+        self.tab_controller.restore_session()
 
         # 窗口
         self.resize(1100, 720)
@@ -137,6 +141,13 @@ class MainWindow(FluentWidget):
         # 主题切换
         qconfig.themeChanged.connect(self._on_system_theme_changed)
         self.theme_listener.start()
+
+        # 自动保存定时器（30 秒间隔）
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setInterval(30_000)
+        self._auto_save_timer.timeout.connect(self._do_auto_save)
+        if self.settings.get("auto_save", False):
+            self._auto_save_timer.start()
 
         # 首屏预热：窗口显示后，空闲时让 WebEngine 预热渲染管线，
         # 避免用户第一次输入 / 第一次切 tab 卡顿
@@ -196,6 +207,17 @@ class MainWindow(FluentWidget):
 
         self._export_action = Action(FluentIcon.SHARE, "导出", triggered=self._do_export)
         cb.addAction(self._export_action)
+        cb.addSeparator()
+
+        auto_save_on = self.settings.get("auto_save", False)
+        self._auto_save_action = Action(
+            FluentIcon.UPDATE,
+            "自动保存: 开" if auto_save_on else "自动保存: 关",
+            triggered=self._do_toggle_auto_save,
+        )
+        self._auto_save_action.setCheckable(True)
+        self._auto_save_action.setChecked(auto_save_on)
+        cb.addAction(self._auto_save_action)
 
         # 收集需要有文档才生效的 action
         self._editor_actions = [
@@ -207,6 +229,32 @@ class MainWindow(FluentWidget):
         ]
         # 初始状态：无文档，禁用
         self._update_editor_actions_enabled(False)
+
+        # 快捷键
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        """注册全局快捷键。"""
+        shortcuts = {
+            "Ctrl+N": self.tab_controller.new_document,
+            "Ctrl+O": self.tab_controller.open_document,
+            "Ctrl+S": self.tab_controller.save_current,
+            "Ctrl+Shift+S": self.tab_controller.save_current_as,
+            "Ctrl+W": self._do_close_current_tab,
+            "F11": self._do_toggle_fullscreen,
+            "Ctrl+=": self._do_zoom_in,
+            "Ctrl+-": self._do_zoom_out,
+            "Ctrl+0": self._do_zoom_reset,
+            "Ctrl+E": self._do_export,
+        }
+        for key, slot in shortcuts.items():
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.activated.connect(slot)
+
+    def _do_close_current_tab(self) -> None:
+        index = self.tab_container.tab_bar.currentIndex()
+        if index >= 0:
+            self.tab_container.tab_bar.tabCloseRequested.emit(index)
 
     # ---------------- 状态栏 ----------------
     def _build_status_bar(self) -> None:
@@ -338,6 +386,27 @@ class MainWindow(FluentWidget):
             parent=self,
         )
 
+    # ---------------- 自动保存 ----------------
+    def _do_toggle_auto_save(self) -> None:
+        enabled = not self.settings.get("auto_save", False)
+        self.settings.set("auto_save", enabled)
+        self._auto_save_action.setText("自动保存: 开" if enabled else "自动保存: 关")
+        self._auto_save_action.setChecked(enabled)
+        if enabled:
+            self._auto_save_timer.start()
+        else:
+            self._auto_save_timer.stop()
+
+    def _do_auto_save(self) -> None:
+        """定时自动保存所有已有路径且被修改的文档。"""
+        for editor in self.tab_controller.all_editors():
+            doc = editor.document
+            if doc.is_modified and not doc.is_untitled:
+                try:
+                    doc.save()
+                except Exception:  # noqa: BLE001
+                    pass
+
     # ---------------- 最近文件 ----------------
     def _do_show_recent_menu(self) -> None:
         recent = self.tab_controller.recent_files.recent_files
@@ -430,6 +499,22 @@ class MainWindow(FluentWidget):
             self.main_layout.setContentsMargins(border, top + border, border, border)
         else:
             self.main_layout.setContentsMargins(0, top, 0, 0)
+
+    # ---------------- 拖拽打开文件 ----------------
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.toLocalFile().lower().endswith((".md", ".markdown", ".txt")):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path and os.path.isfile(path):
+                self.tab_controller.open_file_by_path(path)
+        event.acceptProposedAction()
 
     # ---------------- 生命周期 ----------------
     def closeEvent(self, e):
