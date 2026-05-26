@@ -127,6 +127,7 @@ class MainWindow(FluentWidget):
         # 跨 tab 同步：主题 + 状态栏（必须在 restore_session 之前连接，否则恢复时按钮不会启用）
         self.theme_controller.previewThemeChanged.connect(self._on_preview_theme_changed)
         self.tab_controller.currentDocumentChanged.connect(self._on_current_document_changed)
+        self.tab_controller.tabAdded.connect(self._on_tab_added)
 
         # 恢复上次退出时未关闭的 tab
         self.tab_controller.restore_session()
@@ -500,6 +501,10 @@ class MainWindow(FluentWidget):
         for editor in self.tab_controller.all_editors():
             editor.update_editor_style()
             editor.update_preview()
+
+    def _on_tab_added(self) -> None:
+        """新增 tab 后重新启用 Mica 效果（使用 WebEngine 后需要重新启用）"""
+        self.setMicaEffectEnabled(True)
 
     # ---------------- 窗口状态自适应 ----------------
     def resizeEvent(self, event):

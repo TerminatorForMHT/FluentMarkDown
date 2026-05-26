@@ -54,8 +54,7 @@ def main() -> int:
     window = MainWindow()
     window.showMaximized()
 
-    if hasattr(window, 'windowEffect') and window.windowEffect is not None:
-        window.windowEffect.setMicaEffect(window.winId(), isDarkTheme())
+    window.setMicaEffectEnabled(True)
 
     return app.exec_()
 

@@ -272,9 +272,16 @@ class MarkdownEditorView(QFrame):
         self._suppress_text_signal = False
 
         self.update_editor_style()
-        # 不立即 setHtml，等首次 showEvent 时再渲染，避免后台 tab 预热抢主线程
+        # 立即刷新预览，确保内容正确显示
         self._html_dirty = True
         self._body_dirty = True
+        # 直接重建页面，避免 _page_loaded 状态问题
+        md_text = self.editor.toPlainText()
+        html_body = _render_markdown(md_text)
+        self._last_rendered_md = md_text
+        self._rebuild_page(html_body)
+        self._html_dirty = False
+        self._body_dirty = False
 
     # ---------------- 对外属性 ----------------
     @property
@@ -360,6 +367,22 @@ class MarkdownEditorView(QFrame):
         self.splitter.setStretchFactor(1, 1)
 
         self._update_preview_round_mask()
+
+        # 强制初始刷新，解决首次打开时编辑区和预览区空白的问题
+        QTimer.singleShot(0, self._force_initial_refresh)
+
+    def _force_initial_refresh(self) -> None:
+        """在首次显示时强制刷新编辑器和预览区内容，解决空白问题。"""
+        self.editor.viewport().update()
+        self.update_editor_style()
+        if self._html_dirty or self._body_dirty or not self._page_loaded:
+            self._flush_preview(force_body=True)
+        else:
+            md_text = self.editor.toPlainText()
+            html_body = _render_markdown(md_text)
+            self._rebuild_page(html_body)
+            self._html_dirty = False
+            self._body_dirty = False
 
     def _wire_signals(self) -> None:
         self.editor.textChanged.connect(self._on_text_changed)

@@ -23,6 +23,7 @@ class TabController(QObject):
     """多 tab 文档管理控制器。"""
 
     currentDocumentChanged = pyqtSignal(object)  # emits Document or None
+    tabAdded = pyqtSignal()  # 新增 tab 时发出，用于通知主窗口重新启用 Mica 效果
 
     def __init__(
         self,
@@ -162,6 +163,7 @@ class TabController(QObject):
         self._tab_bar.setCurrentTab(route_key)
         self._stack.setCurrentWidget(editor)
         self.currentDocumentChanged.emit(document)
+        self.tabAdded.emit()  # 通知主窗口重新启用 Mica 效果
 
         document.modifiedChanged.connect(
             lambda _modified, rk=route_key: self._sync_tab_title(rk)
