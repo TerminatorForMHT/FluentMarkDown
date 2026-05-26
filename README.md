@@ -2,6 +2,14 @@
 
 一个支持 Mica 效果的 Markdown 编辑器，使用 PyQt5 和 PyQt-Fluent-Widgets 构建。
 
+## 界面预览
+
+### 深色主题
+![深色主题](resources/img/md/readme/Dark.png)
+
+### 浅色主题
+![浅色主题](resources/img/md/readme/Light.png)
+
 ## 功能特性
 
 - 实时 Markdown 预览
