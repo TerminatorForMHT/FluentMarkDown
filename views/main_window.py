@@ -81,7 +81,6 @@ class MainWindow(FluentWidget):
 
     def __init__(self):
         super().__init__()
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAcceptDrops(True)
 
         setTheme(Theme.AUTO)
@@ -503,14 +502,13 @@ class MainWindow(FluentWidget):
             editor.update_preview()
 
     # ---------------- 窗口状态自适应 ----------------
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == event.WindowStateChange:
             self._update_layout_margins()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_layout_margins()
 
     def _update_layout_margins(self) -> None:
         """根据窗口状态动态调整布局 margin，解决 Windows 最大化后的偏移问题。"""
