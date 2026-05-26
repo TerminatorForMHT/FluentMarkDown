@@ -31,6 +31,7 @@ from qfluentwidgets import (
     Action,
     FluentIcon,
     FluentWidget,
+    MessageBox,
     RoundMenu,
     SystemThemeListener,
     Theme,
@@ -246,10 +247,31 @@ class MainWindow(FluentWidget):
             "Ctrl+-": self._do_zoom_out,
             "Ctrl+0": self._do_zoom_reset,
             "Ctrl+E": self._do_export,
+            "Ctrl+F": self._do_show_find,
+            "Ctrl+H": self._do_show_find_replace,
+            "Esc": self._do_hide_find,
         }
         for key, slot in shortcuts.items():
             shortcut = QShortcut(QKeySequence(key), self)
             shortcut.activated.connect(slot)
+
+    def _do_show_find(self) -> None:
+        """显示查找栏"""
+        editor = self.tab_controller.current_editor()
+        if editor:
+            editor.show_find_bar(with_replace=False)
+
+    def _do_show_find_replace(self) -> None:
+        """显示查找+替换栏"""
+        editor = self.tab_controller.current_editor()
+        if editor:
+            editor.show_find_bar(with_replace=True)
+
+    def _do_hide_find(self) -> None:
+        """隐藏查找栏"""
+        editor = self.tab_controller.current_editor()
+        if editor and editor.find_replace_bar.isVisible():
+            editor.hide_find_bar()
 
     def _do_close_current_tab(self) -> None:
         index = self.tab_container.tab_bar.currentIndex()
@@ -518,6 +540,25 @@ class MainWindow(FluentWidget):
 
     # ---------------- 生命周期 ----------------
     def closeEvent(self, e):
+        # 检查是否有未保存的文档
+        unsaved_docs = []
+        for editor in self.tab_controller.all_editors():
+            if editor.document.is_modified:
+                unsaved_docs.append(editor.document)
+
+        if unsaved_docs:
+            # 构建未保存文件列表
+            file_list = "\n".join([f"• {doc.display_name}" for doc in unsaved_docs])
+            message = f"以下 {len(unsaved_docs)} 个文档有未保存的修改：\n\n{file_list}\n\n确定要放弃修改并退出吗？"
+            
+            box = MessageBox("未保存的文档", message, self.window())
+            box.yesButton.setText("放弃修改")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                e.ignore()  # 用户取消，阻止关闭
+                return
+        
+        # 没有未保存文档或用户确认放弃，正常退出
         self.tab_controller.save_session()
         self.theme_listener.terminate()
         self.theme_listener.deleteLater()
