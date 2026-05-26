@@ -411,6 +411,26 @@ class MainWindow(FluentWidget):
             editor.update_editor_style()
             editor.update_preview()
 
+    # ---------------- 窗口状态自适应 ----------------
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == event.WindowStateChange:
+            self._update_layout_margins()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_layout_margins()
+
+    def _update_layout_margins(self) -> None:
+        """根据窗口状态动态调整布局 margin，解决 Windows 最大化后的偏移问题。"""
+        top = self.titleBar.height()
+        if sys.platform.startswith("win") and self.isMaximized():
+            # Windows 最大化时有不可见的系统边框（通常 7~8px），需要加到四周 margin
+            border = 8
+            self.main_layout.setContentsMargins(border, top + border, border, border)
+        else:
+            self.main_layout.setContentsMargins(0, top, 0, 0)
+
     # ---------------- 生命周期 ----------------
     def closeEvent(self, e):
         self.tab_controller.save_session()
