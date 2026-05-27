@@ -413,6 +413,11 @@ class MarkdownWidget(QFrame):
         for name, btn in self._command_bar_buttons.items():
             if btn and name not in ('new', 'open'):
                 btn.setEnabled(enabled)
+        # 处理主题选择器
+        if hasattr(self, 'theme_combo') and self.theme_combo:
+            self.theme_combo.setEnabled(enabled)
+        if hasattr(self, 'theme_label_cmd') and self.theme_label_cmd:
+            self.theme_label_cmd.setEnabled(enabled)
 
     def _updatePreviewRoundMask(self):
         if not hasattr(self, "preview_container"):
@@ -519,6 +524,7 @@ class MarkdownWidget(QFrame):
         image_button = TransparentPushButton(FluentIcon.PHOTO, "插入图片")
         image_button.clicked.connect(self.insert_image)
         self.command_bar.addWidget(image_button)
+        self._command_bar_buttons['image'] = image_button
 
         self.command_bar.addSeparator()
 
@@ -526,14 +532,17 @@ class MarkdownWidget(QFrame):
         zoom_in_button = TransparentPushButton(FluentIcon.ZOOM_IN, "放大")
         zoom_in_button.clicked.connect(self.zoom_in)
         self.command_bar.addWidget(zoom_in_button)
+        self._command_bar_buttons['zoom_in'] = zoom_in_button
 
         zoom_out_button = TransparentPushButton(FluentIcon.ZOOM_OUT, "缩小")
         zoom_out_button.clicked.connect(self.zoom_out)
         self.command_bar.addWidget(zoom_out_button)
+        self._command_bar_buttons['zoom_out'] = zoom_out_button
 
         zoom_reset_button = TransparentPushButton(FluentIcon.HOME, "重置")
         zoom_reset_button.clicked.connect(self.zoom_reset)
         self.command_bar.addWidget(zoom_reset_button)
+        self._command_bar_buttons['zoom_reset'] = zoom_reset_button
 
         self.command_bar.addSeparator()
 
