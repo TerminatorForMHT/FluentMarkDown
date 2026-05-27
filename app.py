@@ -165,7 +165,7 @@ if __name__ == "__main__":
     
     # 创建窗口
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     
     # 启用Mica效果
     if hasattr(window, 'windowEffect') and window.windowEffect is not None:

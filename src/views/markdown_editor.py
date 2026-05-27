@@ -2,7 +2,7 @@ import os
 import markdown
 
 from PyQt5.QtWidgets import (
-    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog, QMessageBox
+    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog
 )
 from PyQt5.QtCore import Qt,  QPoint
 from PyQt5.QtGui import QPainterPath, QRegion, QColor
@@ -31,10 +31,17 @@ from qfluentwidgets import (
     ComboBox,
     BodyLabel,
     SingleDirectionScrollArea,
-    isDarkTheme
+    isDarkTheme,
+    Dialog,
+    MessageBox,
+    DropDownPushButton,
+    RoundMenu,
+    Action
 )
 from qframelesswindow.webengine import FramelessWebEngineView
 
+import json
+import os
 from src.models.themes import PreviewThemes
 
 # 导出功能所需的库
@@ -57,12 +64,22 @@ class MarkdownWidget(QFrame):
         self.setObjectName("markdownInterface")
         self.is_fullscreen = False
         self.is_editor_fullscreen = False
+        self.has_file = False
+        self.is_modified = False
+        self.current_file_path = None
         self.preview_theme = "light"
         self.font_size = 16
         self._preview_updating = False
         self._preview_dirty = False
         self._cached_html_template = None
         self._last_md5 = None
+        self._command_bar_buttons = {}
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.timeout.connect(self._auto_save)
+        self._auto_save_interval = 30000
+        self._history_file_path = os.path.join(os.path.expanduser("~"), ".fluentmarkdown_history.json")
+        self._recent_files = self._load_recent_files()
+        self._history_menu = None
 
         # 主布局
         self.vBoxLayout = QVBoxLayout(self)
@@ -91,9 +108,10 @@ class MarkdownWidget(QFrame):
         self.splitter = QSplitter(Qt.Horizontal, self.editor_card)
         self.splitter.setStyleSheet('''
             QSplitter { background-color: transparent; }
-            QSplitter::handle { width: 4px; background-color: rgba(100,149,237,0.25); }
-            QSplitter::handle:hover { background-color: rgba(100,149,237,0.55); }
+            QSplitter::handle { width: 0px; background-color: transparent; }
         ''')
+        self.splitter.setHandleWidth(0)
+        self.splitter.setEnabled(False)
         self.editor_layout.addWidget(self.splitter, 1)
         self.card_container_layout.addWidget(self.editor_card, 1)
 
@@ -188,9 +206,214 @@ class MarkdownWidget(QFrame):
         # 初始化
         self.update_editor_style()
         self.update_status_bar()
-        QTimer.singleShot(0, self.update_preview)
+
+        # 初始状态：显示欢迎页
+        QTimer.singleShot(0, self._show_welcome_page)
+        QTimer.singleShot(10, self._update_command_bar_enabled)
 
     # ---------------- 圆角裁剪（只裁右上/右下） ----------------
+    def _show_welcome_page(self):
+        self.has_file = False
+        self.editor.clear()
+        self.editor.hide()
+        from qfluentwidgets import isDarkTheme
+        is_dark = isDarkTheme()
+        welcome_html = self._generate_welcome_html(is_dark)
+        self.preview.setHtml(welcome_html)
+        self.splitter.setSizes([0, self.splitter.width()])
+
+    def _generate_welcome_html(self, is_dark):
+        if is_dark:
+            body_color = "rgba(255, 255, 255, 0.9)"
+            h1_color = "rgba(255, 255, 255, 0.85)"
+            p_color = "rgba(255, 255, 255, 0.6)"
+            shortcut_bg = "rgba(255, 255, 255, 0.1)"
+            shortcut_key_bg = "rgba(255, 255, 255, 0.15)"
+            shortcut_key_color = "rgba(255, 255, 255, 0.9)"
+        else:
+            body_color = "rgba(0, 0, 0, 0.9)"
+            h1_color = "rgba(0, 0, 0, 0.85)"
+            p_color = "rgba(0, 0, 0, 0.6)"
+            shortcut_bg = "rgba(0, 0, 0, 0.06)"
+            shortcut_key_bg = "rgba(0, 0, 0, 0.1)"
+            shortcut_key_color = "rgba(0, 0, 0, 0.8)"
+        return f'''
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: transparent;
+            color: {body_color};
+        }}
+        .container {{
+            text-align: center;
+            padding: 40px;
+        }}
+        .icon {{
+            font-size: 72px;
+            margin-bottom: 24px;
+        }}
+        h1 {{
+            font-size: 36px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+            color: {h1_color};
+        }}
+        p {{
+            font-size: 18px;
+            margin-bottom: 32px;
+            line-height: 1.6;
+            color: {p_color};
+        }}
+        .shortcuts {{
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }}
+        .shortcut {{
+            background: {shortcut_bg};
+            padding: 12px 20px;
+            border-radius: 8px;
+        }}
+        .shortcut-key {{
+            background: {shortcut_key_bg};
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-right: 8px;
+            color: {shortcut_key_color};
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">📝</div>
+        <h1>FluentMarkDown</h1>
+        <p>新建或打开 Markdown 文件开始编辑</p>
+        <div class="shortcuts">
+            <div class="shortcut">
+                <span class="shortcut-key">Ctrl+N</span>新建文件
+            </div>
+            <div class="shortcut">
+                <span class="shortcut-key">Ctrl+O</span>打开文件
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+'''
+
+    def _load_recent_files(self):
+        try:
+            if os.path.exists(self._history_file_path):
+                with open(self._history_file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return []
+
+    def _save_recent_files(self):
+        try:
+            with open(self._history_file_path, 'w', encoding='utf-8') as f:
+                json.dump(self._recent_files, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _add_to_recent_files(self, file_path):
+        if not file_path:
+            return
+        if file_path in self._recent_files:
+            self._recent_files.remove(file_path)
+        self._recent_files.insert(0, file_path)
+        if len(self._recent_files) > 10:
+            self._recent_files = self._recent_files[:10]
+        self._save_recent_files()
+        self._update_history_menu()
+
+    def _update_history_menu(self):
+        if self._history_menu is None:
+            return
+        self._history_menu.clear()
+        if not self._recent_files:
+            action = Action("无历史文件", self._history_menu)
+            action.setEnabled(False)
+            self._history_menu.addAction(action)
+        else:
+            for file_path in self._recent_files:
+                file_name = os.path.basename(file_path)
+                action = Action(file_name, self._history_menu)
+                action.setToolTip(file_path)
+                action.triggered.connect(lambda checked, fp=file_path: self.open_file(fp))
+                self._history_menu.addAction(action)
+            self._history_menu.addSeparator()
+            clear_action = Action("清除历史", self._history_menu)
+            clear_action.triggered.connect(self._clear_recent_files)
+            self._history_menu.addAction(clear_action)
+
+    def _clear_recent_files(self):
+        self._recent_files = []
+        self._save_recent_files()
+        self._update_history_menu()
+
+    def _show_info_dialog(self, title, content):
+        w = MessageBox(title, content, self)
+        w.exec()
+
+    def _show_yes_no_dialog(self, title, content):
+        w = MessageBox(title, content, self)
+        return w.exec()
+
+    def _auto_save(self):
+        if self.has_file and self.is_modified and self.current_file_path:
+            try:
+                with open(self.current_file_path, 'w', encoding='utf-8') as f:
+                    f.write(self.editor.toPlainText())
+                self.is_modified = False
+            except Exception as e:
+                pass
+
+    def _start_auto_save_timer(self):
+        self._auto_save_timer.start(self._auto_save_interval)
+
+    def _stop_auto_save_timer(self):
+        self._auto_save_timer.stop()
+
+    def check_save_on_close(self):
+        if self.has_file and self.is_modified:
+            ret = self._show_yes_no_dialog(
+                "文件已修改",
+                f"是否保存对 {self.current_file_path or 'untitled.md'} 的更改？"
+            )
+            if ret:
+                self.save_file()
+                return True
+            else:
+                return True
+        return False
+
+    def _hide_welcome_page(self):
+        self._preview_updating = False
+        self.editor.show()
+        self.splitter.setEnabled(True)
+        w = self.splitter.width()
+        self.splitter.setSizes([w // 2, w // 2])
+
+    def _update_command_bar_enabled(self):
+        enabled = self.has_file
+        for name, btn in self._command_bar_buttons.items():
+            if btn and name not in ('new', 'open'):
+                btn.setEnabled(enabled)
+
     def _updatePreviewRoundMask(self):
         if not hasattr(self, "preview_container"):
             return
@@ -245,34 +468,47 @@ class MarkdownWidget(QFrame):
         new_button = TransparentPushButton(FluentIcon.ADD, "新建")
         new_button.clicked.connect(self.new_file)
         self.command_bar.addWidget(new_button)
+        self._command_bar_buttons['new'] = new_button
 
         open_button = TransparentPushButton(FluentIcon.FOLDER, "打开")
         open_button.clicked.connect(self.open_file_dialog)
         self.command_bar.addWidget(open_button)
+        self._command_bar_buttons['open'] = open_button
+
+        self._history_menu = RoundMenu(parent=self)
+        self._update_history_menu()
+        recent_button = DropDownPushButton(FluentIcon.HISTORY, "最近", self)
+        recent_button.setMenu(self._history_menu)
+        self.command_bar.addWidget(recent_button)
 
         save_button = TransparentPushButton(FluentIcon.SAVE, "保存")
         save_button.clicked.connect(self.save_file_dialog)
         self.command_bar.addWidget(save_button)
+        self._command_bar_buttons['save'] = save_button
 
         self.command_bar.addSeparator()
 
         copy_button = TransparentPushButton(FluentIcon.COPY, "复制")
         copy_button.clicked.connect(self.copy)
         self.command_bar.addWidget(copy_button)
+        self._command_bar_buttons['copy'] = copy_button
 
         paste_button = TransparentPushButton(FluentIcon.PASTE, "粘贴")
         paste_button.clicked.connect(self.paste)
         self.command_bar.addWidget(paste_button)
+        self._command_bar_buttons['paste'] = paste_button
 
         self.command_bar.addSeparator()
 
         fullscreen_button = TransparentPushButton(FluentIcon.ZOOM_IN, "全屏阅读")
         fullscreen_button.clicked.connect(self.toggle_fullscreen)
         self.command_bar.addWidget(fullscreen_button)
+        self._command_bar_buttons['fullscreen'] = fullscreen_button
 
         fullscreen_edit_button = TransparentPushButton(FluentIcon.EDIT, "全屏编辑")
         fullscreen_edit_button.clicked.connect(self.toggle_editor_fullscreen)
         self.command_bar.addWidget(fullscreen_edit_button)
+        self._command_bar_buttons['fullscreen_edit'] = fullscreen_edit_button
 
         self.command_bar.addSeparator()
 
@@ -304,6 +540,7 @@ class MarkdownWidget(QFrame):
         export_button = TransparentPushButton(FluentIcon.SHARE, "导出")
         export_button.clicked.connect(self.export_file)
         self.command_bar.addWidget(export_button)
+        self._command_bar_buttons['export'] = export_button
 
     def setup_theme_menu(self):
         self.theme_label_cmd = BodyLabel("预览主题:")
@@ -406,6 +643,9 @@ class MarkdownWidget(QFrame):
             self.editor.setCursorWidth(2)
 
     def _on_text_changed(self):
+        if not self.has_file:
+            return
+        self.is_modified = True
         if self._preview_updating:
             self._preview_dirty = True
             return
@@ -413,6 +653,8 @@ class MarkdownWidget(QFrame):
         self._preview_timer.start(self.PREVIEW_UPDATE_DELAY)
 
     def _do_preview_update(self):
+        if not self.has_file:
+            return
         if self._preview_updating:
             self._preview_dirty = True
             return
@@ -653,22 +895,38 @@ class MarkdownWidget(QFrame):
             self._preview_updating = True
             self._last_md5 = None
             self._cached_html_template = None
+            self.current_file_path = file_path
+            self.is_modified = False
+            self.has_file = True
+            self._add_to_recent_files(file_path)
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+            self._hide_welcome_page()
             self.editor.setPlainText(content)
+            self._start_auto_save_timer()
+            self._update_command_bar_enabled()
             QTimer.singleShot(0, self._do_preview_update)
 
     def save_file(self, file_path):
         if file_path:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(self.editor.toPlainText())
+            self.current_file_path = file_path
+            self.is_modified = False
+            self._start_auto_save_timer()
 
     def new_file(self):
         self._preview_timer.stop()
         self._preview_updating = True
         self._last_md5 = None
         self._cached_html_template = None
+        self.current_file_path = None
+        self.is_modified = False
+        self.has_file = True
+        self._hide_welcome_page()
         self.editor.clear()
+        self._start_auto_save_timer()
+        self._update_command_bar_enabled()
         QTimer.singleShot(0, self._do_preview_update)
 
     def copy(self):
@@ -686,22 +944,32 @@ class MarkdownWidget(QFrame):
                 file_name = f"image_{uuid.uuid4().hex}.png"
                 file_path = os.path.join(temp_dir, file_name)
                 if image.save(file_path, "PNG"):
-                    self.editor.textCursor().insertText(f"![{file_name}]({file_path})")
+                    file_url = self._local_path_to_url(file_path)
+                    self.editor.textCursor().insertText(f"![{file_name}]({file_url})")
                     self.update_preview()
                     return
         self.editor.paste()
 
     def insert_image(self):
+        if not self.has_file:
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Image", "",
             "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.svg);;All Files (*)"
         )
         if file_path:
             image_name = os.path.basename(file_path)
-            self.editor.textCursor().insertText(f"![{image_name}]({file_path})")
+            file_url = self._local_path_to_url(file_path)
+            self.editor.textCursor().insertText(f"![{image_name}]({file_url})")
             self.update_preview()
 
+    def _local_path_to_url(self, path):
+        import urllib.parse
+        return urllib.parse.quote(path.replace('\\', '/'), safe=':/')
+
     def toggle_fullscreen(self):
+        if not self.has_file:
+            return
         if not self.is_fullscreen:
             self.editor.hide()
             self.splitter.setSizes([0, self.splitter.width()])
@@ -720,6 +988,8 @@ class MarkdownWidget(QFrame):
         self._updatePreviewRoundMask()
 
     def toggle_editor_fullscreen(self):
+        if not self.has_file:
+            return
         if not self.is_editor_fullscreen:
             self.preview_container.hide()
             w = self.splitter.width()
@@ -742,18 +1012,24 @@ class MarkdownWidget(QFrame):
     
     def zoom_in(self):
         """放大字体"""
+        if not self.has_file:
+            return
         self.font_size = min(self.font_size + 2, 32)  # 最大32px
         self.update_editor_style()
         self.update_preview()
-    
+
     def zoom_out(self):
         """缩小字体"""
+        if not self.has_file:
+            return
         self.font_size = max(self.font_size - 2, 8)   # 最小8px
         self.update_editor_style()
         self.update_preview()
-    
+
     def zoom_reset(self):
         """重置字体大小"""
+        if not self.has_file:
+            return
         self.font_size = 16  # 恢复默认字体大小
         self.update_editor_style()
         self.update_preview()
@@ -780,6 +1056,8 @@ class MarkdownWidget(QFrame):
 
     # ---------------- 导出（保持原逻辑，略） ----------------
     def export_file(self):
+        if not self.has_file:
+            return
         file_path, file_type = QFileDialog.getSaveFileName(
             self, "Export File", "",
             "PDF Files (*.pdf);;Word Files (*.docx);;HTML Files (*.html);;All Files (*)"
@@ -807,7 +1085,7 @@ class MarkdownWidget(QFrame):
 
     def export_to_pdf(self, file_path, markdown_text):
         if not HAS_EXPORT_LIBS:
-            QMessageBox.warning(self, "导出错误", "fpdf 库未安装，请运行: pip install fpdf")
+            self._show_info_dialog("导出错误", "fpdf 库未安装，请运行: pip install fpdf")
             return
         try:
             import re
@@ -901,13 +1179,13 @@ class MarkdownWidget(QFrame):
             pdf_content = pdf.output(dest='S')
             with open(file_path, 'wb') as f:
                 f.write(pdf_content.encode('latin-1'))
-            QMessageBox.information(self, "导出成功", f"PDF 已成功导出到:\n{file_path}")
+            self._show_info_dialog("导出成功", f"PDF 已成功导出到:\n{file_path}")
         except Exception as e:
             error_msg = f"导出 PDF 时出错:\n{str(e)}"
             print(f"Error exporting to PDF: {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.critical(self, "导出错误", error_msg)
+            self._show_info_dialog("导出错误", error_msg)
 
     def _parse_inline_style(self, text, pdf, font_regular, font_bold, code_font):
         import re
