@@ -6,7 +6,6 @@ def setup_high_dpi():
     """
     设置高分屏幕支持
     """
-    # 启用高分屏幕支持
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 

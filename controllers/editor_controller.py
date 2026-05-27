@@ -1,0 +1,188 @@
+import markdown
+
+
+class EditorController:
+    def __init__(self, document):
+        self.document = document
+        self.preview_theme = "light"
+        self.font_size = 16
+        self._last_md5 = None
+        self._cached_html_template = None
+
+    def set_content(self, content):
+        self.document.content = content
+        self.document.is_modified = True
+
+    def get_content(self):
+        return self.document.content
+
+    def set_theme(self, theme):
+        self.preview_theme = theme
+        self._last_md5 = None
+        self._cached_html_template = None
+
+    def set_font_size(self, size):
+        self.font_size = size
+        self._last_md5 = None
+        self._cached_html_template = None
+
+    def render_preview(self, is_dark=False):
+        ts = self._get_theme_styles(is_dark)
+        html = markdown.markdown(self.document.content, extensions=['fenced_code'])
+        return self._build_html(html, ts)
+
+    def _get_theme_styles(self, is_dark):
+        from models.themes import PreviewThemes
+        ts = PreviewThemes.get_theme_styles(self.preview_theme)
+        
+        if self.preview_theme == "light" and is_dark:
+            ts["text_color"] = "#e0e0e0"
+            ts["heading_color"] = "#ffffff"
+            ts["code_bg"] = "rgba(255, 255, 255, 0.1)"
+            ts["blockquote_bg"] = "rgba(255, 255, 255, 0.05)"
+            ts["scrollbar_track"] = "#3d3d3d"
+            ts["scrollbar_thumb"] = "#5d5d5d"
+            ts["scrollbar_thumb_hover"] = "#7d7d7d"
+            ts["link_color"] = "#64b5f6"
+        
+        return ts
+
+    def _build_html(self, html, ts):
+        r = 8
+        styled_html = '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: transparent !important;
+    color: ''' + ts["text_color"] + ''';
+    font-family: Arial, sans-serif;
+    font-size: ''' + str(self.font_size) + '''px;
+  }
+
+  .content {
+    height: 100%;
+    background: ''' + ts["background_color"] + ''';
+    border-top-right-radius: ''' + str(r) + '''px;
+    border-bottom-right-radius: ''' + str(r) + '''px;
+    overflow: hidden;
+  }
+
+  .scroll {
+    height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 20px 20px 36px 20px;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: ''' + ts["scrollbar_track"] + '''; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: ''' + ts["scrollbar_thumb"] + '''; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: ''' + ts["scrollbar_thumb_hover"] + '''; }
+
+  h1,h2,h3,h4,h5,h6 { color: ''' + ts["heading_color"] + '''; margin: 20px 0 10px; }
+  p { margin: 0 0 10px; }
+
+  code { background: ''' + ts["code_bg"] + '''; padding: 2px 4px; border-radius: 3px; color: ''' + ts["text_color"] + '''; }
+  pre { position: relative; background: ''' + ts["code_bg"] + '''; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; color: ''' + ts["text_color"] + '''; }
+  pre code { background: transparent; padding: 0; border-radius: 0; }
+  .copy-button { position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: ''' + ts["text_color"] + '''; }
+  .copy-button:hover { background: rgba(255,255,255,0.3); }
+  .copy-button.copied { background: rgba(76,175,80,0.7); color: white; }
+
+  blockquote {
+    border-left: 4px solid rgba(100,149,237,0.5);
+    margin: 10px 0;
+    padding: 10px 15px;
+    background: ''' + ts["blockquote_bg"] + ''';
+  }
+
+  a { color: ''' + ts["link_color"] + '''; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid rgba(0,0,0,0.12); padding: 8px; text-align: left; }
+  th { background: ''' + ts["code_bg"] + '''; }
+</style>
+</head>
+<body>
+  <div class="content">
+    <div class="scroll">
+      ''' + html + '''
+    </div>
+  </div>
+</body>
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    var preElements = document.querySelectorAll("pre");
+    preElements.forEach(function(pre) {
+      var copyButton = document.createElement("button");
+      copyButton.className = "copy-button";
+      copyButton.textContent = "复制";
+      pre.appendChild(copyButton);
+      copyButton.addEventListener("click", function() {
+        var code = pre.querySelector("code");
+        if (code) {
+          var text = code.textContent;
+          try {
+            var textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            var success = document.execCommand("copy");
+            if (success) {
+              copyButton.textContent = "已复制";
+              copyButton.classList.add("copied");
+              setTimeout(function() {
+                copyButton.textContent = "复制";
+                copyButton.classList.remove("copied");
+              }, 2000);
+            } else {
+              throw new Error("复制失败");
+            }
+          } catch (err) {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              navigator.clipboard.writeText(text).then(function() {
+                copyButton.textContent = "已复制";
+                copyButton.classList.add("copied");
+                setTimeout(function() {
+                  copyButton.textContent = "复制";
+                  copyButton.classList.remove("copied");
+                }, 2000);
+              }).catch(function() {
+                copyButton.textContent = "复制失败";
+                setTimeout(function() {
+                  copyButton.textContent = "复制";
+                }, 2000);
+              });
+            } else {
+              copyButton.textContent = "复制失败";
+              setTimeout(function() {
+                copyButton.textContent = "复制";
+              }, 2000);
+            }
+          } finally {
+            var textArea = document.querySelector("textarea[style*='-999999px']");
+            if (textArea) {
+              document.body.removeChild(textArea);
+            }
+          }
+        }
+      });
+    });
+  });
+</script>
+</html>
+'''
+        return styled_html
