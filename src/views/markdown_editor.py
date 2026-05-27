@@ -2,7 +2,7 @@ import os
 import markdown
 
 from PyQt5.QtWidgets import (
-    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog
+    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog, QMessageBox
 )
 from PyQt5.QtCore import Qt,  QPoint
 from PyQt5.QtGui import QPainterPath, QRegion, QColor
@@ -20,7 +20,7 @@ import markdown
 from PyQt5.QtWidgets import (
     QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog
 )
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QTimer, QCryptographicHash
 from PyQt5.QtGui import QPainterPath, QRegion, QColor
 
 from qfluentwidgets import (
@@ -50,13 +50,19 @@ class MarkdownWidget(QFrame):
     """Markdown 编辑和预览界面"""
 
     PREVIEW_RADIUS = 8
+    PREVIEW_UPDATE_DELAY = 300
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("markdownInterface")
         self.is_fullscreen = False
+        self.is_editor_fullscreen = False
         self.preview_theme = "light"
-        self.font_size = 16  # 默认字体大小
+        self.font_size = 16
+        self._preview_updating = False
+        self._preview_dirty = False
+        self._cached_html_template = None
+        self._last_md5 = None
 
         # 主布局
         self.vBoxLayout = QVBoxLayout(self)
@@ -170,15 +176,19 @@ class MarkdownWidget(QFrame):
         self.vBoxLayout.addWidget(self.card_container, 1)
         self.vBoxLayout.addWidget(self.status_bar)
 
-        # 信号
-        self.editor.textChanged.connect(self.update_preview)
+        # 防抖定时器
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.timeout.connect(self._do_preview_update)
+
+        # 信号（使用防抖）
+        self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self.update_status_bar)
 
         # 初始化
         self.update_editor_style()
         self.update_status_bar()
-        self.update_preview()
-        self._updatePreviewRoundMask()
+        QTimer.singleShot(0, self.update_preview)
 
     # ---------------- 圆角裁剪（只裁右上/右下） ----------------
     def _updatePreviewRoundMask(self):
@@ -260,6 +270,10 @@ class MarkdownWidget(QFrame):
         fullscreen_button.clicked.connect(self.toggle_fullscreen)
         self.command_bar.addWidget(fullscreen_button)
 
+        fullscreen_edit_button = TransparentPushButton(FluentIcon.EDIT, "全屏编辑")
+        fullscreen_edit_button.clicked.connect(self.toggle_editor_fullscreen)
+        self.command_bar.addWidget(fullscreen_edit_button)
+
         self.command_bar.addSeparator()
 
         self.setup_theme_menu()
@@ -318,6 +332,8 @@ class MarkdownWidget(QFrame):
 
     def set_preview_theme(self, theme_name):
         self.preview_theme = theme_name
+        self._last_md5 = None
+        self._cached_html_template = None
         self.update_preview()
         self.update_status_bar()
 
@@ -389,10 +405,30 @@ class MarkdownWidget(QFrame):
             ''')
             self.editor.setCursorWidth(2)
 
+    def _on_text_changed(self):
+        if self._preview_updating:
+            self._preview_dirty = True
+            return
+        self._preview_timer.stop()
+        self._preview_timer.start(self.PREVIEW_UPDATE_DELAY)
+
+    def _do_preview_update(self):
+        if self._preview_updating:
+            self._preview_dirty = True
+            return
+        self.update_preview()
+        while self._preview_dirty:
+            self._preview_dirty = False
+            self.update_preview()
+
     # ---------------- 预览：Mica + 圆角 + 底部滚动修复 ----------------
     def update_preview(self):
         md_text = self.editor.toPlainText()
-        html = markdown.markdown(md_text, extensions=['fenced_code'])
+        current_md5 = QCryptographicHash.hash(md_text.encode('utf-8'), QCryptographicHash.Md5).toHex().data().decode()
+        if current_md5 == self._last_md5 and self._cached_html_template:
+            self._apply_cached_html()
+            return
+        self._preview_updating = True
 
         from qfluentwidgets import isDarkTheme
         is_dark = isDarkTheme()
@@ -434,6 +470,8 @@ class MarkdownWidget(QFrame):
             link_color = ts["link_color"]
         
         r = self.PREVIEW_RADIUS
+
+        html = markdown.markdown(md_text, extensions=['fenced_code'])
 
         # 关键点：
         # - html/body 永远透明 -> 角落透出 Mica
@@ -587,8 +625,18 @@ class MarkdownWidget(QFrame):
 </html>
 '''
         self.preview.setHtml(styled_html)
+        self._cached_html_template = styled_html
+        self._last_md5 = current_md5
+        self._preview_updating = False
+        if self._preview_dirty:
+            self._preview_dirty = False
+            QTimer.singleShot(0, self._do_preview_update)
         self._updatePreviewRoundMask()
         self.update_status_bar()
+
+    def _apply_cached_html(self):
+        if self._cached_html_template:
+            self.preview.setHtml(self._cached_html_template)
 
     # ---------------- 基础功能 ----------------
     def open_file_dialog(self):
@@ -601,8 +649,14 @@ class MarkdownWidget(QFrame):
 
     def open_file(self, file_path):
         if file_path:
+            self._preview_timer.stop()
+            self._preview_updating = True
+            self._last_md5 = None
+            self._cached_html_template = None
             with open(file_path, 'r', encoding='utf-8') as f:
-                self.editor.setPlainText(f.read())
+                content = f.read()
+            self.editor.setPlainText(content)
+            QTimer.singleShot(0, self._do_preview_update)
 
     def save_file(self, file_path):
         if file_path:
@@ -610,7 +664,12 @@ class MarkdownWidget(QFrame):
                 f.write(self.editor.toPlainText())
 
     def new_file(self):
+        self._preview_timer.stop()
+        self._preview_updating = True
+        self._last_md5 = None
+        self._cached_html_template = None
         self.editor.clear()
+        QTimer.singleShot(0, self._do_preview_update)
 
     def copy(self):
         self.editor.copy()
@@ -649,6 +708,7 @@ class MarkdownWidget(QFrame):
             self.editor_layout.setContentsMargins(0, 0, 0, 0)
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
             self.is_fullscreen = True
+            self.is_editor_fullscreen = False
         else:
             self.editor.show()
             w = self.splitter.width()
@@ -656,6 +716,27 @@ class MarkdownWidget(QFrame):
             self.editor_layout.setContentsMargins(1, 1, 1, 1)
             self.card_container_layout.setContentsMargins(5, 5, 5, 5)
             self.is_fullscreen = False
+
+        self._updatePreviewRoundMask()
+
+    def toggle_editor_fullscreen(self):
+        if not self.is_editor_fullscreen:
+            self.preview_container.hide()
+            w = self.splitter.width()
+            self.splitter.setSizes([w, 0])
+            self.editor_layout.setContentsMargins(0, 0, 0, 0)
+            self.card_container_layout.setContentsMargins(0, 0, 0, 0)
+            self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+            self.is_editor_fullscreen = True
+            self.is_fullscreen = False
+        else:
+            self.preview_container.show()
+            w = self.splitter.width()
+            self.splitter.setSizes([w // 2, w // 2])
+            self.editor_layout.setContentsMargins(1, 1, 1, 1)
+            self.card_container_layout.setContentsMargins(5, 5, 5, 5)
+            self.scroll_area.setStyleSheet("")
+            self.is_editor_fullscreen = False
 
         self._updatePreviewRoundMask()
     
@@ -726,20 +807,136 @@ class MarkdownWidget(QFrame):
 
     def export_to_pdf(self, file_path, markdown_text):
         if not HAS_EXPORT_LIBS:
-            print("Error: fpdf not installed. pip install fpdf")
+            QMessageBox.warning(self, "导出错误", "fpdf 库未安装，请运行: pip install fpdf")
             return
         try:
+            import re
+            import warnings
+            warnings.filterwarnings('ignore')
+
             pdf = FPDF()
             pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            for line in markdown_text.split('\n'):
-                try:
-                    pdf.multi_cell(0, 8, line)
-                except UnicodeEncodeError:
-                    pdf.multi_cell(0, 8, line.encode('ascii', 'ignore').decode('ascii'))
-            pdf.output(file_path)
+
+            font_path = 'C:/Windows/Fonts/simhei.ttf'
+            code_font_path = 'C:/Windows/Fonts/consola.ttf'
+
+            if os.path.exists(font_path):
+                pdf.add_font('SimHei', '', font_path, uni=True)
+                pdf.add_font('SimHei', 'B', font_path, uni=True)
+                font_regular = 'SimHei'
+                font_bold = 'SimHei'
+            else:
+                font_regular = 'Arial'
+                font_bold = 'Arial'
+
+            if os.path.exists(code_font_path):
+                pdf.add_font('Consolas', '', code_font_path, uni=True)
+                code_font = 'Consolas'
+            else:
+                code_font = font_regular
+
+            def contains_chinese(text):
+                return bool(re.search(r'[\u4e00-\u9fff]', text))
+
+            def get_code_font(text):
+                if contains_chinese(text) and os.path.exists(font_path):
+                    return 'SimHei'
+                return code_font
+
+            lines = markdown_text.split('\n')
+            i = 0
+            in_code_block = False
+            while i < len(lines):
+                line = lines[i]
+
+                if line.strip().startswith('```'):
+                    if not in_code_block:
+                        in_code_block = True
+                        i += 1
+                        continue
+                    else:
+                        in_code_block = False
+                        i += 1
+                        continue
+
+                if in_code_block:
+                    current_font = get_code_font(line)
+                    pdf.set_font(current_font, size=11)
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.multi_cell(0, 6, line, fill=True)
+                    i += 1
+                    continue
+
+                if line.startswith('# '):
+                    pdf.set_font(font_bold, size=20)
+                    pdf.multi_cell(0, 10, line[2:])
+                elif line.startswith('## '):
+                    pdf.set_font(font_bold, size=16)
+                    pdf.multi_cell(0, 8, line[3:])
+                elif line.startswith('### '):
+                    pdf.set_font(font_bold, size=14)
+                    pdf.multi_cell(0, 7, line[4:])
+                elif line.startswith('- ') or line.startswith('* '):
+                    pdf.set_font(font_regular, size=12)
+                    pdf.multi_cell(0, 6, f"  •  {line[2:]}")
+                elif re.match(r'^\d+\.\s', line):
+                    match = re.match(r'^(\d+)\.\s(.*)', line)
+                    if match:
+                        pdf.set_font(font_regular, size=12)
+                        pdf.multi_cell(0, 6, f"  {match.group(1)}. {match.group(2)}")
+                    else:
+                        pdf.set_font(font_regular, size=12)
+                        pdf.multi_cell(0, 6, line)
+                elif line.startswith('>'):
+                    pdf.set_font(font_regular, size=11)
+                    pdf.set_fill_color(245, 245, 245)
+                    pdf.multi_cell(0, 6, line[1:], fill=True)
+                elif line.strip() == '':
+                    pdf.ln(3)
+                else:
+                    pdf.set_font(font_regular, size=12)
+                    pdf.multi_cell(0, 6, line)
+                i += 1
+
+            pdf_content = pdf.output(dest='S')
+            with open(file_path, 'wb') as f:
+                f.write(pdf_content.encode('latin-1'))
+            QMessageBox.information(self, "导出成功", f"PDF 已成功导出到:\n{file_path}")
         except Exception as e:
+            error_msg = f"导出 PDF 时出错:\n{str(e)}"
             print(f"Error exporting to PDF: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "导出错误", error_msg)
+
+    def _parse_inline_style(self, text, pdf, font_regular, font_bold, code_font):
+        import re
+        result = []
+        pattern = re.compile(r'\*\*(.+?)\*\*(.+?)', re.DOTALL)
+        pattern2 = re.compile(r'\*(.+?)\*(.+?)', re.DOTALL)
+        pattern3 = re.compile(r'`(.+?)`(.+?)', re.DOTALL)
+
+        remaining = text
+        while remaining:
+            bold_match = pattern.match(remaining)
+            italic_match = pattern2.match(remaining)
+            code_match = pattern3.match(remaining)
+
+            if bold_match:
+                result.append(('bold', bold_match.group(1)))
+                remaining = bold_match.group(2)
+            elif italic_match:
+                result.append(('italic', italic_match.group(1)))
+                remaining = italic_match.group(2)
+            elif code_match:
+                result.append(('code', code_match.group(1)))
+                remaining = code_match.group(2)
+            else:
+                if remaining:
+                    result.append(('normal', remaining))
+                break
+
+        return ''.join([item[1] for item in result])
 
     def export_to_word(self, file_path, markdown_text):
         if not HAS_EXPORT_LIBS:
