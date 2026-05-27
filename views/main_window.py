@@ -128,6 +128,7 @@ class MainWindow(FluentWidget):
         self.theme_controller.previewThemeChanged.connect(self._on_preview_theme_changed)
         self.tab_controller.currentDocumentChanged.connect(self._on_current_document_changed)
         self.tab_controller.tabAdded.connect(self._on_tab_added)
+        self.tab_controller.tabRemoved.connect(self._on_tab_removed)
 
         # 恢复上次退出时未关闭的 tab
         self.tab_controller.restore_session()
@@ -503,8 +504,12 @@ class MainWindow(FluentWidget):
             editor.update_preview()
 
     def _on_tab_added(self) -> None:
-        """新增 tab 后重新启用 Mica 效果（使用 WebEngine 后需要重新启用）"""
-        self.setMicaEffectEnabled(True)
+        """新增 tab 后重新启用 Mica 效果（WebEngine 会破坏 Mica，需延迟重新启用）"""
+        QTimer.singleShot(100, lambda: self.setMicaEffectEnabled(True))
+
+    def _on_tab_removed(self) -> None:
+        """关闭 tab 后重新启用 Mica 效果（WebEngine 销毁后恢复）"""
+        QTimer.singleShot(200, lambda: self.setMicaEffectEnabled(True))
 
     # ---------------- 窗口状态自适应 ----------------
     def resizeEvent(self, event):
