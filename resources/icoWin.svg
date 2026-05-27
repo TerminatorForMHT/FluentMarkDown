@@ -1,0 +1,90 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- ============== 阴影 ============== -->
+    <filter id="docShadow" x="-10%" y="-5%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#02061A" flood-opacity="0.45"/>
+    </filter>
+    <filter id="inkShadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#020A20" flood-opacity="0.50"/>
+    </filter>
+
+    <!-- ============== 玻璃文档 ============== -->
+    <linearGradient id="glassFace" x1="220" y1="80" x2="820" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="0.5" stop-color="#F3F7FF" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#DCE8FF" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="glassEdge" x1="260" y1="880" x2="820" y2="980" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E40AF" stop-opacity="0.50"/>
+      <stop offset="1" stop-color="#4338CA" stop-opacity="0.50"/>
+    </linearGradient>
+    <linearGradient id="strokeHi" x1="240" y1="80" x2="840" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.90"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.15"/>
+    </linearGradient>
+    <radialGradient id="specHi" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+      gradientTransform="translate(360 200) rotate(25) scale(500 360)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="foldGrad" x1="670" y1="100" x2="820" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.90"/>
+      <stop offset="1" stop-color="#C4D8FF" stop-opacity="0.60"/>
+    </linearGradient>
+
+    <!-- ============== 字标渐变 ============== -->
+    <linearGradient id="inkGrad" x1="300" y1="360" x2="740" y2="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E3A8A"/>
+      <stop offset="0.5" stop-color="#3730A3"/>
+      <stop offset="1" stop-color="#6D28D9"/>
+    </linearGradient>
+    <linearGradient id="arrowGrad" x1="540" y1="460" x2="540" y2="680" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：完全透明（Windows Fluent Design 规范） -->
+
+  <!-- ============== 玻璃文档主体 ============== -->
+  <g filter="url(#docShadow)">
+    <!-- 厚度（下右偏移 → 3D） -->
+    <path d="M262 196C262 162.86 288.86 136 322 136H620C640.35 136 659.82 144.09 674.12 158.39L776.61 260.879C790.91 275.17 799 294.65 799 315V812C799 845.14 772.14 872 739 872H322C288.86 872 262 845.14 262 812V196Z"
+      fill="url(#glassEdge)"/>
+    <!-- 正面 -->
+    <path d="M232 166C232 132.86 258.86 106 292 106H590C610.35 106 629.82 114.09 644.12 128.39L746.61 230.879C760.91 245.17 769 264.65 769 285V782C769 815.14 742.14 842 709 842H292C258.86 842 232 815.14 232 782V166Z"
+      fill="url(#glassFace)"/>
+    <!-- 镜面高光 -->
+    <path d="M250 186C258 142 290 120 330 116H560C616 116 656 150 672 196C592 202 510 242 440 298C370 354 320 430 294 510C274 396 256 278 250 186Z"
+      fill="url(#specHi)" opacity="0.75"/>
+    <!-- 折角 -->
+    <path d="M590 106V226C590 259.14 616.86 286 650 286H769L590 106Z"
+      fill="url(#foldGrad)"/>
+    <!-- 折角线 -->
+    <path d="M590 106V226C590 259.14 616.86 286 650 286H769"
+      fill="none" stroke="#FFFFFF" stroke-width="3" stroke-opacity="0.65"/>
+    <!-- 文档内描边 -->
+    <path d="M292 112H590C609.0 112 627.2 119.58 640.6 132.92L743.08 235.41C756.42 248.8 764 267.0 764 286V782C764 812.38 739.38 837 709 837H292C261.62 837 237 812.38 237 782V166C237 135.62 261.62 112 292 112Z"
+      fill="none" stroke="url(#strokeHi)" stroke-width="7"/>
+  </g>
+
+  <!-- ============== "M ↓" 字标 ============== -->
+  <g filter="url(#inkShadow)">
+    <!-- M -->
+    <path d="M312 640V442C312 428.75 322.75 418 336 418H356C363.9 418 371.3 421.88 375.72 428.38L444 528L512.28 428.38C516.7 421.88 524.1 418 532 418H552C565.25 418 576 428.75 576 442V640C576 653.25 565.25 664 552 664H540C526.75 664 516 653.25 516 640V518L462 596C457.92 602.0 451.28 605.6 444.1 605.6C436.92 605.6 430.28 602.0 426.2 596L370 514V640C370 653.25 359.25 664 346 664H336C322.75 664 312 653.25 312 640Z"
+      fill="url(#inkGrad)"/>
+    <!-- 箭头 ↓ -->
+    <g fill="url(#arrowGrad)">
+      <rect x="668" y="418" width="40" height="152" rx="20"/>
+      <path d="M688 660L614 568C607.8 560.2 613.2 549 623 549H753C762.8 549 768.2 560.2 762 568L688 660Z"/>
+    </g>
+  </g>
+
+  <!-- ============== 底部示意"文本行" ============== -->
+  <g opacity="0.40">
+    <rect x="312" y="712" width="340" height="14" rx="7" fill="#1E3A8A"/>
+    <rect x="312" y="744" width="260" height="14" rx="7" fill="#1E3A8A"/>
+    <rect x="312" y="776" width="190" height="14" rx="7" fill="#1E3A8A"/>
+  </g>
+</svg>

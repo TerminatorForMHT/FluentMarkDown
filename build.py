@@ -10,7 +10,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "dist")
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 MAIN_SCRIPT = os.path.join(PROJECT_ROOT, "app.py")
-ICON_FILE = os.path.join(PROJECT_ROOT, "resources", "mark.ico")
+ICON_FILE = os.path.join(PROJECT_ROOT, "resources", "icon.ico")
 
 
 def clean_build():
@@ -23,10 +23,10 @@ def clean_build():
 
 def build_exe():
     print("开始编译可执行文件...")
-    
+
     import sys
     python_exe = sys.executable
-    
+
     cmd = [
         python_exe,
         "-m", "PyInstaller",
@@ -40,28 +40,28 @@ def build_exe():
         "--collect-submodules", "models",
         MAIN_SCRIPT
     ]
-    
+
     print(f"执行命令: {' '.join(cmd)}")
-    
+
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
-    
+
     if result.returncode == 0:
         print("编译成功！")
         print(f"可执行文件位于: {os.path.join(OUTPUT_DIR, 'FluentMarkdown.exe')}")
     else:
         print("编译失败！")
         return False
-    
+
     return True
 
 
 def main():
     print("=== Fluent Markdown 编译脚本 ===")
-    
+
     clean_build()
-    
+
     success = build_exe()
-    
+
     if success:
         print("\n编译完成！")
         print("你可以在 dist 目录中找到可执行文件。")

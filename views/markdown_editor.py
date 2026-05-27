@@ -30,13 +30,13 @@ class MarkdownWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setObjectName("markdownInterface")
-        
+
         self.document = MarkdownDocument()
         self.controller = EditorController(self.document)
-        
+
         self.is_fullscreen = False
         self.is_editor_fullscreen = False
-        
+
         self._preview_updating = False
         self._preview_dirty = False
         self._last_md5 = None
@@ -51,7 +51,7 @@ class MarkdownWidget(QFrame):
 
         self._setup_ui()
         self._connect_signals()
-        
+
         QTimer.singleShot(0, self._show_welcome_page)
 
     def _setup_ui(self):
@@ -65,45 +65,45 @@ class MarkdownWidget(QFrame):
 
     def _setup_command_bar(self):
         self.command_bar = CommandBar(self)
-        
+
         self._add_command_button('new', FluentIcon.ADD, "新建", self.new_file)
         self._add_command_button('open', FluentIcon.FOLDER, "打开", self.open_file_dialog)
-        
+
         self._history_menu = RoundMenu(parent=self)
         recent_button = DropDownPushButton(FluentIcon.HISTORY, "最近", self)
         recent_button.setMenu(self._history_menu)
         self.command_bar.addWidget(recent_button)
-        
+
         self._add_command_button('save', FluentIcon.SAVE, "保存", self.save_file_dialog)
-        
+
         self.command_bar.addSeparator()
-        
+
         self._add_command_button('copy', FluentIcon.COPY, "复制", self.copy)
         self._add_command_button('paste', FluentIcon.PASTE, "粘贴", self.paste)
-        
+
         self.command_bar.addSeparator()
-        
+
         self._add_command_button('fullscreen', FluentIcon.ZOOM_IN, "全屏阅读", self.toggle_fullscreen)
         self._add_command_button('fullscreen_edit', FluentIcon.EDIT, "全屏编辑", self.toggle_editor_fullscreen)
-        
+
         self.command_bar.addSeparator()
-        
+
         self._setup_theme_menu()
-        
+
         self.command_bar.addSeparator()
-        
+
         self._add_command_button('image', FluentIcon.PHOTO, "插入图片", self.insert_image)
-        
+
         self.command_bar.addSeparator()
-        
+
         self._add_command_button('zoom_in', FluentIcon.ZOOM_IN, "放大", self.zoom_in)
         self._add_command_button('zoom_out', FluentIcon.ZOOM_OUT, "缩小", self.zoom_out)
         self._add_command_button('zoom_reset', FluentIcon.HOME, "重置", self.zoom_reset)
-        
+
         self.command_bar.addSeparator()
-        
+
         self._add_command_button('export', FluentIcon.SHARE, "导出", self.export_file)
-        
+
         self.vBoxLayout.addWidget(self.command_bar)
 
     def _add_command_button(self, name, icon, text, callback):
@@ -114,7 +114,7 @@ class MarkdownWidget(QFrame):
 
     def _setup_theme_menu(self):
         from models.themes import PreviewThemes
-        
+
         self.theme_label_cmd = BodyLabel("预览主题:")
         self.theme_combo = ComboBox()
 
@@ -379,7 +379,7 @@ class MarkdownWidget(QFrame):
         self.document.is_modified = True
         self.controller.set_content(self.editor.toPlainText())
         self.update_status_bar()
-        
+
         if self._preview_updating:
             self._preview_dirty = True
             return
@@ -400,24 +400,24 @@ class MarkdownWidget(QFrame):
     def update_preview(self):
         content = self.controller.get_content()
         current_md5 = QCryptographicHash.hash(content.encode('utf-8'), QCryptographicHash.Md5).toHex().data().decode()
-        
+
         if current_md5 == self._last_md5 and self.controller._cached_html_template:
             self.preview.setHtml(self.controller._cached_html_template)
             return
-        
+
         self._preview_updating = True
-        
+
         html = self.controller.render_preview(is_dark=isDarkTheme())
         self.preview.setHtml(html)
-        
+
         self.controller._cached_html_template = html
         self._last_md5 = current_md5
         self._preview_updating = False
-        
+
         if self._preview_dirty:
             self._preview_dirty = False
             QTimer.singleShot(0, self._do_preview_update)
-        
+
         self._updatePreviewRoundMask()
 
     def update_editor_style(self):
@@ -450,7 +450,7 @@ class MarkdownWidget(QFrame):
         text = self.editor.toPlainText()
         self.char_count_label.setText(f"字符: {len(text)}")
         self.selection_label.setText(f"选中: {len(self.editor.textCursor().selectedText())}")
-        
+
         from models.themes import PreviewThemes
         theme_info = PreviewThemes.get_theme_styles(self.controller.preview_theme)
         self.theme_label.setText(f"预览主题: {theme_info['name']}")
@@ -480,7 +480,7 @@ class MarkdownWidget(QFrame):
     def open_file(self, file_path):
         if not file_path:
             return
-        
+
         if self.document.load(file_path):
             self.editor.setPlainText(self.document.content)
             self.controller.set_content(self.document.content)
@@ -611,7 +611,7 @@ class MarkdownWidget(QFrame):
 
         content = self.controller.get_content()
         ext = os.path.splitext(file_path)[1].lower()
-        
+
         if not ext:
             if 'PDF Files' in file_type:
                 ext = '.pdf'
@@ -660,17 +660,16 @@ class MarkdownWidget(QFrame):
         self._auto_save_timer.start(self._auto_save_interval)
 
     def check_save_on_close(self):
-        if self.document.has_file and self.document.is_modified:
+        if not self.document.has_file:
+            return True
+        if self.document.is_modified:
             ret = self._show_yes_no_dialog(
                 "文件已修改",
                 f"是否保存对 {self.document.file_path or 'untitled.md'} 的更改？"
             )
             if ret:
                 self.save_file()
-                return True
-            else:
-                return True
-        return False
+        return True
 
     def _updatePreviewRoundMask(self):
         if not hasattr(self, "preview_container"):
@@ -700,7 +699,7 @@ class MarkdownWidget(QFrame):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._updatePreviewRoundMask()
-    
+
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
