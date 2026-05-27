@@ -1,4 +1,6 @@
 import markdown
+import os
+import re
 
 
 class EditorController:
@@ -26,9 +28,44 @@ class EditorController:
         self._last_md5 = None
         self._cached_html_template = None
 
+    def _convert_image_paths(self, html):
+        """将 HTML 中的图片路径转换为 file:// 协议"""
+        from PyQt5.QtCore import QUrl
+        
+        # 获取当前文档所在目录
+        base_dir = os.path.dirname(self.document.file_path) if self.document.file_path else os.getcwd()
+        
+        # 匹配 <img> 标签的 src 属性
+        def replace_path(match):
+            src = match.group(1)
+            # 如果已经是 http/https/data 协议，保持原样
+            if src.startswith(('http://', 'https://', 'data:', 'file://')):
+                return f'<img src="{src}"'
+            
+            # 如果是绝对路径（Windows 或 Unix）
+            if os.path.isabs(src):
+                file_url = QUrl.fromLocalFile(src).toString()
+                return f'<img src="{file_url}"'
+            
+            # 如果是相对路径，基于文档目录解析
+            full_path = os.path.normpath(os.path.join(base_dir, src))
+            if os.path.exists(full_path):
+                file_url = QUrl.fromLocalFile(full_path).toString()
+                return f'<img src="{file_url}"'
+            
+            # 如果路径不存在，保持原样
+            return f'<img src="{src}"'
+        
+        # 使用正则替换图片路径
+        html = re.sub(r'<img\s+src="([^"]+)"', replace_path, html)
+        return html
+
     def render_preview(self, is_dark=False):
         ts = self._get_theme_styles(is_dark)
-        html = markdown.markdown(self.document.content, extensions=['fenced_code'])
+        # 添加更多扩展支持图片和其他格式
+        html = markdown.markdown(self.document.content, extensions=['fenced_code', 'extra', 'tables'])
+        # 转换图片路径为 file:// 协议
+        html = self._convert_image_paths(html)
         return self._build_html(html, ts)
 
     def _get_theme_styles(self, is_dark):
@@ -89,6 +126,7 @@ class EditorController:
 
   h1,h2,h3,h4,h5,h6 { color: ''' + ts["heading_color"] + '''; margin: 20px 0 10px; }
   p { margin: 0 0 10px; }
+  img { max-width: 100%; height: auto; border-radius: 4px; margin: 10px 0; }
 
   code { background: ''' + ts["code_bg"] + '''; padding: 2px 4px; border-radius: 3px; color: ''' + ts["text_color"] + '''; }
   pre { position: relative; background: ''' + ts["code_bg"] + '''; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; color: ''' + ts["text_color"] + '''; }

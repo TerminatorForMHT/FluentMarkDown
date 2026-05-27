@@ -183,6 +183,12 @@ class MarkdownWidget(QFrame):
             self.preview.page().setBackgroundColor(QColor(0, 0, 0, 0))
         except Exception:
             pass
+        
+        # 启用本地文件访问和图片加载
+        from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+        settings = self.preview.settings()
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
 
         self.preview_layout.addWidget(self.preview)
 
@@ -533,7 +539,9 @@ class MarkdownWidget(QFrame):
             self.update_preview()
 
     def _local_path_to_url(self, path):
-        return urllib.parse.quote(path.replace('\\', '/'), safe=':/')
+        # 添加 file:// 协议前缀，确保 WebEngineView 能正确加载本地图片
+        from PyQt5.QtCore import QUrl
+        return QUrl.fromLocalFile(path).toString()
 
     def toggle_fullscreen(self):
         if not self.document.has_file:
@@ -610,6 +618,8 @@ class MarkdownWidget(QFrame):
             return
 
         content = self.controller.get_content()
+        print(f"DEBUG - 导出内容长度: {len(content)}")
+        print(f"DEBUG - 内容前200字符: {content[:200] if content else '空'}")
         ext = os.path.splitext(file_path)[1].lower()
 
         if not ext:
@@ -634,18 +644,219 @@ class MarkdownWidget(QFrame):
         self._show_info_dialog("导出成功" if success else "导出失败", message)
 
     def _show_info_dialog(self, title, content):
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtCore import Qt
+        
+        dialog = QDialog()
+        dialog.setWindowTitle("")
+        dialog.setFixedSize(400, 180)
+        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        dialog.setAttribute(Qt.WA_TranslucentBackground)
+        
         is_dark = isDarkTheme()
-        bg_color = "rgba(30, 30, 30, 0.95)" if is_dark else "rgba(255, 255, 255, 0.95)"
-        w = MessageBox(title, content, self)
-        w.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
-        w.exec()
+        bg_color = "#1e1e1e" if is_dark else "#ffffff"
+        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
+        title_bar_color = "#252526" if is_dark else "#f0f0f0"
+        
+        central_widget = QWidget(dialog)
+        central_widget.setGeometry(0, 0, 400, 180)
+        central_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {bg_color};
+                border-radius: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        title_bar = QWidget()
+        title_bar.setFixedHeight(36)
+        title_bar.setStyleSheet("background-color: transparent;")
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(16, 0, 12, 0)
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {text_color};
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 18px;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
+            }}
+        """)
+        close_btn.clicked.connect(dialog.reject)
+        title_layout.addWidget(close_btn)
+        
+        content_area = QWidget()
+        content_area.setStyleSheet("background-color: transparent;")
+        content_layout = QVBoxLayout(content_area)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        
+        content_label = QLabel(content)
+        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setWordWrap(True)
+        content_layout.addWidget(content_label)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedSize(88, 32)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #0078d4;
+                color: white;
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: #005a9e;
+            }}
+            QPushButton:pressed {{
+                background-color: #004578;
+            }}
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(ok_btn)
+        
+        content_layout.addLayout(button_layout)
+        
+        layout.addWidget(title_bar)
+        layout.addWidget(content_area)
+        
+        dialog.exec()
 
     def _show_yes_no_dialog(self, title, content):
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtCore import Qt
+        
+        dialog = QDialog()
+        dialog.setWindowTitle("")
+        dialog.setFixedSize(450, 200)
+        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        dialog.setAttribute(Qt.WA_TranslucentBackground)
+        
         is_dark = isDarkTheme()
-        bg_color = "rgba(30, 30, 30, 0.95)" if is_dark else "rgba(255, 255, 255, 0.95)"
-        w = MessageBox(title, content, self)
-        w.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
-        return w.exec()
+        bg_color = "#1e1e1e" if is_dark else "#ffffff"
+        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
+        title_bar_color = "#252526" if is_dark else "#f0f0f0"
+        
+        central_widget = QWidget(dialog)
+        central_widget.setGeometry(0, 0, 450, 200)
+        central_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {bg_color};
+                border-radius: 12px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        title_bar = QWidget()
+        title_bar.setFixedHeight(36)
+        title_bar.setStyleSheet("background-color: transparent;")
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(16, 0, 12, 0)
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {text_color};
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 18px;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
+            }}
+        """)
+        close_btn.clicked.connect(dialog.reject)
+        title_layout.addWidget(close_btn)
+        
+        content_area = QWidget()
+        content_area.setStyleSheet("background-color: transparent;")
+        content_layout = QVBoxLayout(content_area)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        
+        content_label = QLabel(content)
+        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setWordWrap(True)
+        content_layout.addWidget(content_label)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        yes_btn = QPushButton("保存")
+        yes_btn.setFixedSize(88, 32)
+        yes_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #0078d4;
+                color: white;
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: #005a9e;
+            }}
+            QPushButton:pressed {{
+                background-color: #004578;
+            }}
+        """)
+        yes_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(yes_btn)
+        
+        no_btn = QPushButton("不保存")
+        no_btn.setFixedSize(88, 32)
+        no_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
+                color: {text_color};
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {'#4a4a4a' if is_dark else '#d0d0d0'};
+            }}
+        """)
+        no_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(no_btn)
+        
+        content_layout.addLayout(button_layout)
+        
+        layout.addWidget(title_bar)
+        layout.addWidget(content_area)
+        
+        result = dialog.exec()
+        return result == QDialog.Accepted
 
     def _auto_save(self):
         if self.document.has_file and self.document.is_modified and self.document.file_path:

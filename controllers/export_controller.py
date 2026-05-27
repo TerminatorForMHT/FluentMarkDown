@@ -14,14 +14,15 @@ class ExportController:
 
     @staticmethod
     def export_pdf(file_path, markdown_text):
-        if not ExportController.HAS_EXPORT_LIBS:
-            return False, "fpdf 库未安装，请运行: pip install fpdf"
-        
         try:
             import re
-            import warnings
             from fpdf import FPDF
-            warnings.filterwarnings('ignore')
+            
+            if not file_path:
+                return False, "文件路径为空"
+            
+            if not markdown_text:
+                return False, "内容为空"
 
             pdf = FPDF()
             pdf.add_page()
@@ -31,79 +32,80 @@ class ExportController:
 
             font_regular = 'Arial'
             font_bold = 'Arial'
-            code_font = 'Arial'
 
             if os.path.exists(font_path):
-                pdf.add_font('SimHei', '', font_path, uni=True)
-                pdf.add_font('SimHei', 'B', font_path, uni=True)
+                pdf.add_font('SimHei', '', font_path)
+                pdf.add_font('SimHei', 'B', font_path)
                 font_regular = 'SimHei'
                 font_bold = 'SimHei'
 
-            if os.path.exists(code_font_path):
-                pdf.add_font('Consolas', '', code_font_path, uni=True)
-                code_font = 'Consolas'
-
-            def contains_chinese(text):
-                return bool(re.search(r'[\u4e00-\u9fff]', text))
-
-            def get_code_font(text):
-                if contains_chinese(text) and os.path.exists(font_path):
-                    return 'SimHei'
-                return code_font
-
             lines = markdown_text.split('\n')
-            i = 0
             in_code_block = False
-            while i < len(lines):
-                line = lines[i]
-
+            
+            for line in lines:
+                if line is None:
+                    continue
+                    
+                line = str(line)
+                
                 if line.strip().startswith('```'):
                     in_code_block = not in_code_block
-                    i += 1
                     continue
-
+                
                 if in_code_block:
-                    current_font = get_code_font(line)
-                    pdf.set_font(current_font, size=11)
-                    pdf.set_fill_color(240, 240, 240)
-                    pdf.multi_cell(0, 6, line, fill=True)
-                elif line.startswith('# '):
-                    pdf.set_font(font_bold, size=20)
-                    pdf.multi_cell(0, 10, line[2:])
-                elif line.startswith('## '):
-                    pdf.set_font(font_bold, size=16)
-                    pdf.multi_cell(0, 8, line[3:])
-                elif line.startswith('### '):
-                    pdf.set_font(font_bold, size=14)
-                    pdf.multi_cell(0, 7, line[4:])
-                elif line.startswith('- ') or line.startswith('* '):
-                    pdf.set_font(font_regular, size=12)
-                    pdf.multi_cell(0, 6, f"  •  {line[2:]}")
+                    pdf.set_font(font_regular, '', 10)
+                    pdf.cell(0, 5, line)
+                    pdf.ln()
+                elif line.startswith('# ') and len(line) > 2:
+                    pdf.set_font(font_bold, 'B', 20)
+                    pdf.cell(0, 12, line[2:])
+                    pdf.ln()
+                elif line.startswith('## ') and len(line) > 3:
+                    pdf.set_font(font_bold, 'B', 16)
+                    pdf.cell(0, 10, line[3:])
+                    pdf.ln()
+                elif line.startswith('### ') and len(line) > 4:
+                    pdf.set_font(font_bold, 'B', 14)
+                    pdf.cell(0, 8, line[4:])
+                    pdf.ln()
+                elif line.startswith('- ') and len(line) > 2:
+                    pdf.set_font(font_regular, '', 12)
+                    pdf.cell(0, 6, f"  - {line[2:]}")
+                    pdf.ln()
+                elif line.startswith('* ') and len(line) > 2:
+                    pdf.set_font(font_regular, '', 12)
+                    pdf.cell(0, 6, f"  - {line[2:]}")
+                    pdf.ln()
                 elif re.match(r'^\d+\.\s', line):
                     match = re.match(r'^(\d+)\.\s(.*)', line)
                     if match:
-                        pdf.set_font(font_regular, size=12)
-                        pdf.multi_cell(0, 6, f"  {match.group(1)}. {match.group(2)}")
+                        pdf.set_font(font_regular, '', 12)
+                        pdf.cell(0, 6, f"  {match.group(1)}. {match.group(2)}")
+                        pdf.ln()
                     else:
-                        pdf.set_font(font_regular, size=12)
-                        pdf.multi_cell(0, 6, line)
+                        pdf.set_font(font_regular, '', 12)
+                        pdf.cell(0, 6, line)
+                        pdf.ln()
                 elif line.startswith('>'):
-                    pdf.set_font(font_regular, size=11)
-                    pdf.set_fill_color(245, 245, 245)
-                    pdf.multi_cell(0, 6, line[1:], fill=True)
+                    pdf.set_font(font_regular, '', 11)
+                    pdf.cell(0, 5, line[1:])
+                    pdf.ln()
                 elif line.strip() == '':
                     pdf.ln(3)
                 else:
-                    pdf.set_font(font_regular, size=12)
-                    pdf.multi_cell(0, 6, line)
-                i += 1
+                    pdf.set_font(font_regular, '', 12)
+                    pdf.cell(0, 6, line)
+                    pdf.ln()
 
-            pdf_content = pdf.output(dest='S')
-            with open(file_path, 'wb') as f:
-                f.write(pdf_content.encode('latin-1'))
+            pdf.output(file_path)
             return True, f"PDF 已成功导出到:\n{file_path}"
+        except ImportError:
+            return False, "fpdf2 库未安装，请运行: pip install fpdf2"
         except Exception as e:
-            return False, f"导出 PDF 时出错:\n{str(e)}"
+            import traceback
+            error_details = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            print(f"PDF导出错误详情: {error_details}")
+            return False, f"导出 PDF 时出错:\n{type(e).__name__}: {str(e)}"
 
     @staticmethod
     def export_word(file_path, markdown_text):
