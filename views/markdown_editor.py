@@ -8,6 +8,7 @@ Markdown 编辑器视图（纯视图组件）。
 """
 import json
 import os
+import sys
 
 import markdown as md_lib
 
