@@ -24,6 +24,7 @@ class TabController(QObject):
 
     currentDocumentChanged = pyqtSignal(object)  # emits Document or None
     tabAdded = pyqtSignal()  # 新增 tab 时发出，用于通知主窗口重新启用 Mica 效果
+    tabRemoved = pyqtSignal()  # tab 被关闭后发出，用于通知主窗口重新启用 Mica 效果
 
     def __init__(
         self,
@@ -228,6 +229,9 @@ class TabController(QObject):
             if self._stack.count() > 0:
                 self._stack.setCurrentIndex(0)
             self.currentDocumentChanged.emit(None)
+
+        # WebEngine 销毁后需要重新启用 Mica 效果
+        self.tabRemoved.emit()
 
     def _current_route_key(self) -> Optional[str]:
         index = self._tab_bar.currentIndex()
