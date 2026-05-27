@@ -6,11 +6,11 @@
 
 ### 浅色主题
 
-![浅色主题](resources/img/readme/Light.png)
+![浅色主题](https://github.com/TerminatorForMHT/FluentMarkDown/blob/main/resources/img/readme/Light.png)
 
 ### 深色主题
 
-![深色主题](resources/img/readme/Dark.png)
+![深色主题](https://github.com/TerminatorForMHT/FluentMarkDown/blob/main/resources/img/readme/Dark.png)
 
 ## 功能特性
 
