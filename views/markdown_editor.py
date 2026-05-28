@@ -473,7 +473,10 @@ class MarkdownWidget(QFrame):
 
     def new_file(self):
         self.document.new()
+        self.editor.blockSignals(True)
         self.editor.clear()
+        self.editor.blockSignals(False)
+        self.document.is_modified = False
         self._hide_welcome_page()
         self._update_command_bar_enabled()
         self._start_auto_save_timer()
@@ -488,8 +491,10 @@ class MarkdownWidget(QFrame):
             return
 
         if self.document.load(file_path):
+            self.editor.blockSignals(True)
             self.editor.setPlainText(self.document.content)
-            self.controller.set_content(self.document.content)
+            self.editor.blockSignals(False)
+            self.document.is_modified = False
             self._hide_welcome_page()
             self._update_command_bar_enabled()
             self._update_history_menu()
@@ -543,29 +548,41 @@ class MarkdownWidget(QFrame):
         from PyQt5.QtCore import QUrl
         return QUrl.fromLocalFile(path).toString()
 
+    def _restore_split_view(self):
+        """恢复到左右分栏的默认状态"""
+        self.editor.show()
+        self.preview_container.show()
+        self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        w = self.splitter.width()
+        self.splitter.setSizes([w // 2, w // 2])
+        self.editor_layout.setContentsMargins(1, 1, 1, 1)
+        self.card_container_layout.setContentsMargins(5, 5, 5, 5)
+        self.is_fullscreen = False
+        self.is_editor_fullscreen = False
+
     def toggle_fullscreen(self):
         if not self.document.has_file:
             return
         if not self.is_fullscreen:
+            # 先恢复所有控件可见性，再进入全屏阅读
+            self.preview_container.show()
             self.editor.hide()
             self.splitter.setSizes([0, self.splitter.width()])
             self.editor_layout.setContentsMargins(0, 0, 0, 0)
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
+            self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
             self.is_fullscreen = True
             self.is_editor_fullscreen = False
         else:
-            self.editor.show()
-            w = self.splitter.width()
-            self.splitter.setSizes([w // 2, w // 2])
-            self.editor_layout.setContentsMargins(1, 1, 1, 1)
-            self.card_container_layout.setContentsMargins(5, 5, 5, 5)
-            self.is_fullscreen = False
+            self._restore_split_view()
         self._updatePreviewRoundMask()
 
     def toggle_editor_fullscreen(self):
         if not self.document.has_file:
             return
         if not self.is_editor_fullscreen:
+            # 先恢复所有控件可见性，再进入全屏编辑
+            self.editor.show()
             self.preview_container.hide()
             w = self.splitter.width()
             self.splitter.setSizes([w, 0])
@@ -575,13 +592,7 @@ class MarkdownWidget(QFrame):
             self.is_editor_fullscreen = True
             self.is_fullscreen = False
         else:
-            self.preview_container.show()
-            w = self.splitter.width()
-            self.splitter.setSizes([w // 2, w // 2])
-            self.editor_layout.setContentsMargins(1, 1, 1, 1)
-            self.card_container_layout.setContentsMargins(5, 5, 5, 5)
-            self.scroll_area.setStyleSheet("")
-            self.is_editor_fullscreen = False
+            self._restore_split_view()
         self._updatePreviewRoundMask()
 
     def zoom_in(self):
@@ -643,218 +654,213 @@ class MarkdownWidget(QFrame):
 
         self._show_info_dialog("导出成功" if success else "导出失败", message)
 
-    def _show_info_dialog(self, title, content):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-        from PyQt5.QtCore import Qt
-        
-        dialog = QDialog()
-        dialog.setWindowTitle("")
-        dialog.setFixedSize(400, 180)
-        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        dialog.setAttribute(Qt.WA_TranslucentBackground)
-        
+    def _create_fluent_dialog(self, width, height):
+        """创建 Fluent Design 风格弹窗基础框架"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QGraphicsDropShadowEffect
+        from PyQt5.QtCore import Qt, QPoint
+
         is_dark = isDarkTheme()
-        bg_color = "#1e1e1e" if is_dark else "#ffffff"
-        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
-        title_bar_color = "#252526" if is_dark else "#f0f0f0"
-        
-        central_widget = QWidget(dialog)
-        central_widget.setGeometry(0, 0, 400, 180)
-        central_widget.setStyleSheet(f"""
-            QWidget {{
+
+        class DraggableDialog(QDialog):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self._drag_pos = None
+
+            def mousePressEvent(self, event):
+                if event.button() == Qt.LeftButton:
+                    self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+                    event.accept()
+
+            def mouseMoveEvent(self, event):
+                if self._drag_pos is not None and event.buttons() & Qt.LeftButton:
+                    self.move(event.globalPos() - self._drag_pos)
+                    event.accept()
+
+            def mouseReleaseEvent(self, event):
+                self._drag_pos = None
+
+        dialog = DraggableDialog(self.window())
+        dialog.setWindowTitle("")
+        dialog.setFixedSize(width + 40, height + 40)
+        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        dialog.setAttribute(Qt.WA_TranslucentBackground)
+
+        card = QWidget(dialog)
+        card.setGeometry(20, 10, width, height)
+        card.setObjectName("fluentDialogCard")
+
+        bg_color = "rgba(44, 44, 44, 0.96)" if is_dark else "rgba(255, 255, 255, 0.96)"
+        border_color = "rgba(255, 255, 255, 0.08)" if is_dark else "rgba(0, 0, 0, 0.06)"
+        top_border = "rgba(255, 255, 255, 0.12)" if is_dark else "rgba(255, 255, 255, 0.8)"
+
+        card.setStyleSheet(f"""
+            QWidget#fluentDialogCard {{
                 background-color: {bg_color};
-                border-radius: 12px;
+                border: 1px solid {border_color};
+                border-top: 1px solid {top_border};
+                border-radius: 8px;
             }}
         """)
-        
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(16)
+        shadow.setOffset(0, 1)
+        shadow_color = QColor(0, 0, 0, 70 if is_dark else 35)
+        shadow.setColor(shadow_color)
+        card.setGraphicsEffect(shadow)
+
+        return dialog, card, is_dark
+
+    def _fluent_colors(self, is_dark):
+        """获取 Fluent Design 配色"""
+        return {
+            "title": "#ffffff" if is_dark else "#1a1a1a",
+            "body": "rgba(255,255,255,0.7)" if is_dark else "rgba(0,0,0,0.6)",
+            "accent": "#60CDFF" if is_dark else "#005FB8",
+            "accent_hover": "#4DB8E8" if is_dark else "#004C95",
+            "accent_pressed": "#3AAAD4" if is_dark else "#003A75",
+            "subtle_bg": "rgba(255,255,255,0.06)" if is_dark else "rgba(0,0,0,0.03)",
+            "subtle_hover": "rgba(255,255,255,0.09)" if is_dark else "rgba(0,0,0,0.05)",
+            "subtle_pressed": "rgba(255,255,255,0.04)" if is_dark else "rgba(0,0,0,0.03)",
+            "subtle_border": "rgba(255,255,255,0.07)" if is_dark else "rgba(0,0,0,0.06)",
+            "divider": "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)",
+        }
+
+    def _show_info_dialog(self, title, content):
+        from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtCore import Qt
+
+        dialog, card, is_dark = self._create_fluent_dialog(420, 200)
+        colors = self._fluent_colors(is_dark)
+        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(0)
-        
-        title_bar = QWidget()
-        title_bar.setFixedHeight(36)
-        title_bar.setStyleSheet("background-color: transparent;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 12, 0)
-        
+
+        # 标题
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {text_color};
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 18px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-            }}
-        """)
-        close_btn.clicked.connect(dialog.reject)
-        title_layout.addWidget(close_btn)
-        
-        content_area = QWidget()
-        content_area.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        
+        title_label.setStyleSheet(f"color: {colors['title']}; font-family: {font_family}; font-size: 16px; font-weight: 600; background: transparent; border: none;")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # 内容
         content_label = QLabel(content)
-        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setStyleSheet(f"color: {colors['body']}; font-family: {font_family}; font-size: 13px; line-height: 20px; background: transparent; border: none;")
         content_label.setWordWrap(True)
-        content_layout.addWidget(content_label)
-        
+        layout.addWidget(content_label)
+        layout.addStretch(1)
+
+        # 分割线
+        divider = QWidget()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {colors['divider']}; border: none;")
+        layout.addWidget(divider)
+        layout.addSpacing(16)
+
+        # 按钮
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
         button_layout.addStretch()
-        
+
         ok_btn = QPushButton("确定")
-        ok_btn.setFixedSize(88, 32)
+        ok_btn.setFixedSize(120, 32)
+        ok_btn.setCursor(Qt.PointingHandCursor)
         ok_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #0078d4;
-                color: white;
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
+                background-color: {colors['accent']};
+                color: {"#000000" if is_dark else "#ffffff"};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 600;
+                border: none; border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: #005a9e;
-            }}
-            QPushButton:pressed {{
-                background-color: #004578;
-            }}
+            QPushButton:hover {{ background-color: {colors['accent_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['accent_pressed']}; }}
         """)
         ok_btn.clicked.connect(dialog.accept)
         button_layout.addWidget(ok_btn)
-        
-        content_layout.addLayout(button_layout)
-        
-        layout.addWidget(title_bar)
-        layout.addWidget(content_area)
-        
+
+        layout.addLayout(button_layout)
+
         dialog.exec()
 
     def _show_yes_no_dialog(self, title, content):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QDialog
         from PyQt5.QtCore import Qt
-        
-        dialog = QDialog()
-        dialog.setWindowTitle("")
-        dialog.setFixedSize(450, 200)
-        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        dialog.setAttribute(Qt.WA_TranslucentBackground)
-        
-        is_dark = isDarkTheme()
-        bg_color = "#1e1e1e" if is_dark else "#ffffff"
-        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
-        title_bar_color = "#252526" if is_dark else "#f0f0f0"
-        
-        central_widget = QWidget(dialog)
-        central_widget.setGeometry(0, 0, 450, 200)
-        central_widget.setStyleSheet(f"""
-            QWidget {{
-                background-color: {bg_color};
-                border-radius: 12px;
-            }}
-        """)
-        
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+
+        dialog, card, is_dark = self._create_fluent_dialog(460, 210)
+        colors = self._fluent_colors(is_dark)
+        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(0)
-        
-        title_bar = QWidget()
-        title_bar.setFixedHeight(36)
-        title_bar.setStyleSheet("background-color: transparent;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 12, 0)
-        
+
+        # 标题
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {text_color};
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 18px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-            }}
-        """)
-        close_btn.clicked.connect(dialog.reject)
-        title_layout.addWidget(close_btn)
-        
-        content_area = QWidget()
-        content_area.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        
+        title_label.setStyleSheet(f"color: {colors['title']}; font-family: {font_family}; font-size: 16px; font-weight: 600; background: transparent; border: none;")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # 内容
         content_label = QLabel(content)
-        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setStyleSheet(f"color: {colors['body']}; font-family: {font_family}; font-size: 13px; line-height: 20px; background: transparent; border: none;")
         content_label.setWordWrap(True)
-        content_layout.addWidget(content_label)
-        
+        layout.addWidget(content_label)
+        layout.addStretch(1)
+
+        # 分割线
+        divider = QWidget()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {colors['divider']}; border: none;")
+        layout.addWidget(divider)
+        layout.addSpacing(16)
+
+        # 按钮组
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
         button_layout.addStretch()
-        
-        yes_btn = QPushButton("保存")
-        yes_btn.setFixedSize(88, 32)
-        yes_btn.setStyleSheet(f"""
+
+        save_btn = QPushButton("保存")
+        save_btn.setFixedSize(120, 32)
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #0078d4;
-                color: white;
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
+                background-color: {colors['accent']};
+                color: {"#000000" if is_dark else "#ffffff"};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 600;
+                border: none; border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: #005a9e;
-            }}
-            QPushButton:pressed {{
-                background-color: #004578;
-            }}
+            QPushButton:hover {{ background-color: {colors['accent_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['accent_pressed']}; }}
         """)
-        yes_btn.clicked.connect(dialog.accept)
-        button_layout.addWidget(yes_btn)
-        
-        no_btn = QPushButton("不保存")
-        no_btn.setFixedSize(88, 32)
-        no_btn.setStyleSheet(f"""
+        save_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(save_btn)
+
+        discard_btn = QPushButton("不保存")
+        discard_btn.setFixedSize(120, 32)
+        discard_btn.setCursor(Qt.PointingHandCursor)
+        discard_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-                color: {text_color};
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
+                background-color: {colors['subtle_bg']};
+                color: {colors['title']};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 400;
+                border: 1px solid {colors['subtle_border']};
                 border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: {'#4a4a4a' if is_dark else '#d0d0d0'};
-            }}
+            QPushButton:hover {{ background-color: {colors['subtle_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['subtle_pressed']}; }}
         """)
-        no_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(no_btn)
-        
-        content_layout.addLayout(button_layout)
-        
-        layout.addWidget(title_bar)
-        layout.addWidget(content_area)
-        
+        discard_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(discard_btn)
+
+        layout.addLayout(button_layout)
+
         result = dialog.exec()
         return result == QDialog.Accepted
 
@@ -879,7 +885,10 @@ class MarkdownWidget(QFrame):
                 f"是否保存对 {self.document.file_path or 'untitled.md'} 的更改？"
             )
             if ret:
-                self.save_file()
+                if self.document.file_path:
+                    self.save_file()
+                else:
+                    self.save_file_dialog()
         return True
 
     def _updatePreviewRoundMask(self):
