@@ -66,7 +66,7 @@ class EditorController:
         html = markdown.markdown(self.document.content, extensions=['fenced_code', 'extra', 'tables'])
         # 转换图片路径为 file:// 协议
         html = self._convert_image_paths(html)
-        return self._build_html(html, ts)
+        return self._build_html(html, ts, is_dark)
 
     def _get_theme_styles(self, is_dark):
         from models.themes import PreviewThemes
@@ -84,7 +84,7 @@ class EditorController:
         
         return ts
 
-    def _build_html(self, html, ts):
+    def _build_html(self, html, ts, is_dark=False):
         r = 8
         styled_html = '''
 <!DOCTYPE html>
@@ -92,6 +92,9 @@ class EditorController:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/''' + ('github-dark' if is_dark else 'github') + '''.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
   html, body {
     margin: 0;
@@ -131,9 +134,12 @@ class EditorController:
   code { background: ''' + ts["code_bg"] + '''; padding: 2px 4px; border-radius: 3px; color: ''' + ts["text_color"] + '''; }
   pre { position: relative; background: ''' + ts["code_bg"] + '''; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; color: ''' + ts["text_color"] + '''; }
   pre code { background: transparent; padding: 0; border-radius: 0; }
-  .copy-button { position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: ''' + ts["text_color"] + '''; }
+  pre code.hljs { background: transparent; padding: 0; }
+  .copy-button { position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: ''' + ts["text_color"] + '''; z-index: 10; }
   .copy-button:hover { background: rgba(255,255,255,0.3); }
   .copy-button.copied { background: rgba(76,175,80,0.7); color: white; }
+  .mermaid { text-align: center; margin: 16px 0; }
+  .mermaid svg { max-width: 100%; }
 
   blockquote {
     border-left: 4px solid rgba(100,149,237,0.5);
@@ -159,67 +165,66 @@ class EditorController:
 </body>
 <script>
   document.addEventListener("DOMContentLoaded", function() {
-    var preElements = document.querySelectorAll("pre");
-    preElements.forEach(function(pre) {
-      var copyButton = document.createElement("button");
-      copyButton.className = "copy-button";
-      copyButton.textContent = "复制";
-      pre.appendChild(copyButton);
-      copyButton.addEventListener("click", function() {
+    // --- highlight.js: 代码块语法高亮 ---
+    document.querySelectorAll("pre code").forEach(function(block) {
+      if (!block.classList.contains("language-mermaid")) {
+        try { hljs.highlightElement(block); } catch(e) {}
+      }
+    });
+
+    // --- Mermaid: 图表渲染 ---
+    var mermaidBlocks = document.querySelectorAll("pre code.language-mermaid");
+    if (mermaidBlocks.length > 0) {
+      try {
+        mermaid.initialize({ startOnLoad: false, theme: "''' + ('dark' if is_dark else 'default') + '''" });
+        mermaidBlocks.forEach(function(block, idx) {
+          var pre = block.parentElement;
+          var container = document.createElement("div");
+          container.className = "mermaid";
+          container.id = "mermaid-" + idx;
+          container.textContent = block.textContent;
+          pre.replaceWith(container);
+        });
+        mermaid.run();
+      } catch(e) { console.warn("Mermaid init failed:", e); }
+    }
+
+    // --- 复制按钮 ---
+    document.querySelectorAll("pre").forEach(function(pre) {
+      var btn = document.createElement("button");
+      btn.className = "copy-button";
+      btn.textContent = "复制";
+      pre.appendChild(btn);
+      btn.addEventListener("click", function() {
         var code = pre.querySelector("code");
-        if (code) {
-          var text = code.textContent;
-          try {
-            var textArea = document.createElement("textarea");
-            textArea.value = text;
-            textArea.style.position = "fixed";
-            textArea.style.left = "-999999px";
-            textArea.style.top = "-999999px";
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            var success = document.execCommand("copy");
-            if (success) {
-              copyButton.textContent = "已复制";
-              copyButton.classList.add("copied");
-              setTimeout(function() {
-                copyButton.textContent = "复制";
-                copyButton.classList.remove("copied");
-              }, 2000);
-            } else {
-              throw new Error("复制失败");
-            }
-          } catch (err) {
-            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-              navigator.clipboard.writeText(text).then(function() {
-                copyButton.textContent = "已复制";
-                copyButton.classList.add("copied");
-                setTimeout(function() {
-                  copyButton.textContent = "复制";
-                  copyButton.classList.remove("copied");
-                }, 2000);
-              }).catch(function() {
-                copyButton.textContent = "复制失败";
-                setTimeout(function() {
-                  copyButton.textContent = "复制";
-                }, 2000);
-              });
-            } else {
-              copyButton.textContent = "复制失败";
-              setTimeout(function() {
-                copyButton.textContent = "复制";
-              }, 2000);
-            }
-          } finally {
-            var textArea = document.querySelector("textarea[style*='-999999px']");
-            if (textArea) {
-              document.body.removeChild(textArea);
-            }
-          }
+        if (!code) return;
+        var text = code.textContent;
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;left:-9999px;top:-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+          btn.textContent = "已复制";
+          btn.classList.add("copied");
+        } catch(e) {
+          btn.textContent = "失败";
         }
+        document.body.removeChild(ta);
+        setTimeout(function() { btn.textContent = "复制"; btn.classList.remove("copied"); }, 2000);
       });
     });
   });
+
+  // --- 同步滚动：接收来自 Qt 的滚动比例 ---
+  function syncScrollTo(ratio) {
+    var el = document.querySelector(".scroll");
+    if (el) {
+      var maxScroll = el.scrollHeight - el.clientHeight;
+      el.scrollTop = maxScroll * ratio;
+    }
+  }
 </script>
 </html>
 '''
