@@ -729,14 +729,20 @@ class MarkdownWidget(QFrame):
         self.preview.setAttribute(Qt.WA_TranslucentBackground, True)
         self.preview.setStyleSheet("background: transparent; border: none;")
 
-        # 自定义 Page：外部链接用系统浏览器打开
+        # 自定义 Page：md 文件弹出预览窗口，其他链接用系统浏览器打开
         from PyQt5.QtWebEngineWidgets import QWebEnginePage
         from PyQt5.QtGui import QDesktopServices
+
+        widget_ref = self  # 给内部类用
 
         class ExternalLinkPage(QWebEnginePage):
             def acceptNavigationRequest(self, url, nav_type, is_main_frame):
                 if nav_type == QWebEnginePage.NavigationTypeLinkClicked:
-                    QDesktopServices.openUrl(url)
+                    path = url.toLocalFile()
+                    if path and path.lower().endswith('.md'):
+                        widget_ref._open_md_preview_window(path)
+                    else:
+                        QDesktopServices.openUrl(url)
                     return False
                 return super().acceptNavigationRequest(url, nav_type, is_main_frame)
 
@@ -1635,6 +1641,84 @@ class MarkdownWidget(QFrame):
                 else:
                     self.save_file_dialog()
         return True
+
+    def _open_md_preview_window(self, file_path):
+        """打开 .md 文件的 Fluent Design 预览弹窗"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                md_content = f.read()
+        except Exception as e:
+            self._show_info_dialog("打开失败", f"无法读取文件:\n{str(e)}")
+            return
+
+        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt5.QtCore import QUrl
+        from qfluentwidgets import FluentWidget
+        import markdown
+
+        html_body = markdown.markdown(md_content, extensions=['fenced_code', 'extra', 'tables'])
+        is_dark = isDarkTheme()
+        ts = self.controller._get_theme_styles(is_dark)
+        full_html = self.controller._build_html(html_body, ts, is_dark)
+
+        # Fluent 风格窗口
+        from qfluentwidgets import FluentWidget
+        from PyQt5.QtWebEngineWidgets import QWebEnginePage
+        from PyQt5.QtGui import QDesktopServices
+        from qframelesswindow.webengine import FramelessWebEngineView
+
+        preview_win = FluentWidget()
+        preview_win.setWindowTitle(os.path.basename(file_path))
+        preview_win.resize(900, 700)
+
+        layout = QVBoxLayout(preview_win)
+        layout.setContentsMargins(0, preview_win.titleBar.height(), 0, 0)
+        layout.setSpacing(0)
+
+        web_view = FramelessWebEngineView(preview_win)
+        web_view.setAttribute(Qt.WA_TranslucentBackground, True)
+        web_view.setStyleSheet("background: transparent; border: none;")
+        try:
+            web_view.page().setBackgroundColor(QColor(0, 0, 0, 0))
+        except Exception:
+            pass
+        layout.addWidget(web_view)
+
+        # 外部链接：md 弹新窗口，其他用系统浏览器
+        parent_ref = self
+
+        class PopupLinkPage(QWebEnginePage):
+            def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+                if nav_type == QWebEnginePage.NavigationTypeLinkClicked:
+                    path = url.toLocalFile()
+                    if path and path.lower().endswith('.md'):
+                        parent_ref._open_md_preview_window(path)
+                    else:
+                        QDesktopServices.openUrl(url)
+                    return False
+                return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+        popup_page = PopupLinkPage(web_view)
+        web_view.setPage(popup_page)
+        try:
+            web_view.page().setBackgroundColor(QColor(0, 0, 0, 0))
+        except Exception:
+            pass
+
+        base_url = QUrl.fromLocalFile(os.path.dirname(file_path) + '/')
+        web_view.setHtml(full_html, base_url)
+        preview_win.show()
+
+        # Mica 效果必须在 show() 之后应用
+        if preview_win.windowEffect is not None:
+            QTimer.singleShot(100, lambda: (
+                preview_win.windowEffect.setMicaEffect(preview_win.winId(), is_dark)
+            ))
+
+        # 防止被 GC 回收
+        if not hasattr(self, '_md_preview_windows'):
+            self._md_preview_windows = []
+        self._md_preview_windows.append(preview_win)
 
     def _sync_preview_scroll(self):
         """编辑器滚动时同步预览滚动位置"""
