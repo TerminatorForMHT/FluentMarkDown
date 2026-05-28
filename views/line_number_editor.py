@@ -67,6 +67,15 @@ class LineNumberEditor(QPlainTextEdit):
                   self.line_number_area_width(), content_rect.height())
         )
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_line_number_area_width(0)
+        content_rect = self.contentsRect()
+        self._line_number_area.setGeometry(
+            QRect(content_rect.left(), content_rect.top(),
+                  self.line_number_area_width(), content_rect.height())
+        )
+
     def _highlight_current_line(self):
         extra_selections = []
         if not self.isReadOnly():
