@@ -4,10 +4,11 @@ import tempfile
 import uuid
 
 from PyQt5.QtWidgets import (
-    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog, QSplitter, QApplication
+    QTextEdit, QVBoxLayout, QHBoxLayout, QFrame, QWidget, QStatusBar,
+    QFileDialog, QSplitter, QApplication, QLineEdit, QPushButton
 )
 from PyQt5.QtCore import Qt, QPoint, QTimer, QCryptographicHash, QEvent
-from PyQt5.QtGui import QPainterPath, QRegion, QColor
+from PyQt5.QtGui import QPainterPath, QRegion, QColor, QTextCursor, QTextCharFormat
 
 from qfluentwidgets import (
     FluentIcon, CommandBar, TransparentPushButton, CardWidget,
@@ -60,6 +61,7 @@ class MarkdownWidget(QFrame):
         self.vBoxLayout.setSpacing(0)
 
         self._setup_command_bar()
+        self._setup_find_replace_bar()
         self._setup_editor_preview()
         self._setup_status_bar()
 
@@ -111,6 +113,417 @@ class MarkdownWidget(QFrame):
         button.clicked.connect(callback)
         self.command_bar.addWidget(button)
         self._command_bar_buttons[name] = button
+
+    def _setup_find_replace_bar(self):
+        """创建 VS Code 风格的查找替换面板（右侧固定宽度浮动）"""
+        self._find_regex_mode = False
+        self._find_case_sensitive = False
+        self._find_whole_word = False
+
+        self.find_replace_bar = QFrame(self)
+        self.find_replace_bar.setObjectName("findReplaceBar")
+        self.find_replace_bar.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.find_replace_bar.hide()
+
+        outer_layout = QHBoxLayout(self.find_replace_bar)
+        outer_layout.setContentsMargins(0, 4, 0, 4)
+        outer_layout.setSpacing(0)
+
+        # 面板主体容器（固定宽度，左对齐）
+        panel = QFrame()
+        panel.setObjectName("findPanel")
+        panel.setFixedWidth(420)
+
+        # 面板后加弹性占位把它推到最左
+        outer_layout.addWidget(panel)
+        outer_layout.addStretch(1)
+        panel_layout = QHBoxLayout(panel)
+        panel_layout.setContentsMargins(2, 4, 6, 4)
+        panel_layout.setSpacing(0)
+
+        # 左侧折叠箭头
+        self.toggle_replace_btn = QPushButton("▶")
+        self.toggle_replace_btn.setFixedSize(20, 52)
+        self.toggle_replace_btn.setToolTip("切换替换")
+        self.toggle_replace_btn.setCursor(Qt.PointingHandCursor)
+        self.toggle_replace_btn.clicked.connect(self._toggle_replace_row)
+        panel_layout.addWidget(self.toggle_replace_btn, 0, Qt.AlignTop)
+
+        # 右侧行容器
+        rows_widget = QWidget()
+        rows_layout = QVBoxLayout(rows_widget)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(4)
+
+        # === 查找行 ===
+        find_row = QHBoxLayout()
+        find_row.setSpacing(2)
+
+        # 输入框 + 内嵌模式按钮的容器
+        find_input_container = QHBoxLayout()
+        find_input_container.setSpacing(0)
+        find_input_container.setContentsMargins(0, 0, 0, 0)
+
+        self.find_input = QLineEdit()
+        self.find_input.setPlaceholderText("查找")
+        self.find_input.returnPressed.connect(self._find_next)
+        self.find_input.textChanged.connect(self._on_find_text_changed)
+        find_input_container.addWidget(self.find_input, 1)
+
+        # 匹配模式按钮（紧贴输入框右侧）
+        self.case_btn = QPushButton("Aa")
+        self.case_btn.setFixedSize(26, 24)
+        self.case_btn.setCheckable(True)
+        self.case_btn.setToolTip("区分大小写")
+        self.case_btn.setCursor(Qt.PointingHandCursor)
+        self.case_btn.toggled.connect(self._on_case_toggled)
+        find_input_container.addWidget(self.case_btn)
+
+        self.word_btn = QPushButton("ab")
+        self.word_btn.setFixedSize(26, 24)
+        self.word_btn.setCheckable(True)
+        self.word_btn.setToolTip("全字匹配")
+        self.word_btn.setCursor(Qt.PointingHandCursor)
+        self.word_btn.toggled.connect(self._on_word_toggled)
+        find_input_container.addWidget(self.word_btn)
+
+        self.regex_btn = QPushButton(".*")
+        self.regex_btn.setFixedSize(26, 24)
+        self.regex_btn.setCheckable(True)
+        self.regex_btn.setToolTip("正则表达式")
+        self.regex_btn.setCursor(Qt.PointingHandCursor)
+        self.regex_btn.toggled.connect(self._on_regex_toggled)
+        find_input_container.addWidget(self.regex_btn)
+
+        find_row.addLayout(find_input_container, 1)
+
+        # 匹配计数
+        self.find_count_label = BodyLabel("", self)
+        self.find_count_label.setFixedWidth(68)
+        self.find_count_label.setAlignment(Qt.AlignCenter)
+        find_row.addWidget(self.find_count_label)
+
+        # 上一个 / 下一个 / 关闭
+        self.find_prev_btn = QPushButton("↑")
+        self.find_prev_btn.setFixedSize(26, 26)
+        self.find_prev_btn.setToolTip("上一个")
+        self.find_prev_btn.setCursor(Qt.PointingHandCursor)
+        self.find_prev_btn.clicked.connect(self._find_prev)
+        find_row.addWidget(self.find_prev_btn)
+
+        self.find_next_btn = QPushButton("↓")
+        self.find_next_btn.setFixedSize(26, 26)
+        self.find_next_btn.setToolTip("下一个")
+        self.find_next_btn.setCursor(Qt.PointingHandCursor)
+        self.find_next_btn.clicked.connect(self._find_next)
+        find_row.addWidget(self.find_next_btn)
+
+        self.find_close_btn = QPushButton("×")
+        self.find_close_btn.setFixedSize(26, 26)
+        self.find_close_btn.setToolTip("关闭 (Esc)")
+        self.find_close_btn.setCursor(Qt.PointingHandCursor)
+        self.find_close_btn.clicked.connect(self._close_find_replace)
+        find_row.addWidget(self.find_close_btn)
+
+        rows_layout.addLayout(find_row)
+
+        # === 替换行 ===
+        self.replace_row_widget = QWidget()
+        replace_row = QHBoxLayout(self.replace_row_widget)
+        replace_row.setContentsMargins(0, 0, 0, 0)
+        replace_row.setSpacing(2)
+
+        self.replace_input = QLineEdit()
+        self.replace_input.setPlaceholderText("替换")
+        replace_row.addWidget(self.replace_input, 1)
+
+        # 匹配计数位的占位
+        spacer_count = QWidget()
+        spacer_count.setFixedWidth(68)
+        replace_row.addWidget(spacer_count)
+
+        self.replace_btn = QPushButton("⇄")
+        self.replace_btn.setFixedSize(26, 26)
+        self.replace_btn.setToolTip("替换当前")
+        self.replace_btn.setCursor(Qt.PointingHandCursor)
+        self.replace_btn.clicked.connect(self._replace_current)
+        replace_row.addWidget(self.replace_btn)
+
+        self.replace_all_btn = QPushButton("⇄*")
+        self.replace_all_btn.setFixedSize(26, 26)
+        self.replace_all_btn.setToolTip("全部替换")
+        self.replace_all_btn.setCursor(Qt.PointingHandCursor)
+        self.replace_all_btn.clicked.connect(self._replace_all)
+        replace_row.addWidget(self.replace_all_btn)
+
+        # 对齐关闭按钮
+        spacer_close = QWidget()
+        spacer_close.setFixedWidth(26)
+        replace_row.addWidget(spacer_close)
+
+        rows_layout.addWidget(self.replace_row_widget)
+        self.replace_row_widget.hide()
+
+        panel_layout.addWidget(rows_widget, 1)
+
+        self._apply_find_bar_style()
+        self.vBoxLayout.addWidget(self.find_replace_bar)
+
+    def _apply_find_bar_style(self):
+        is_dark = isDarkTheme()
+        bg = "transparent"
+        border_clr = "rgba(255,255,255,0.06)" if is_dark else "rgba(0,0,0,0.08)"
+        input_bg = "rgba(60,60,60,1)" if is_dark else "rgba(255,255,255,1)"
+        input_border = "rgba(255,255,255,0.1)" if is_dark else "rgba(0,0,0,0.12)"
+        input_color = "#cccccc" if is_dark else "#1e1e1e"
+        btn_bg = "transparent"
+        btn_hover = "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)"
+        btn_color = "#cccccc" if is_dark else "#424242"
+        accent = "#0078d4"
+        accent_bg = "rgba(0,120,212,0.15)" if is_dark else "rgba(0,120,212,0.12)"
+        count_color = "rgba(255,255,255,0.45)" if is_dark else "rgba(0,0,0,0.4)"
+        font = "'Segoe UI Variable','Segoe UI',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif"
+
+        self.find_replace_bar.setStyleSheet(f"""
+            QFrame#findReplaceBar {{
+                background: {bg};
+                border-bottom: 1px solid {border_clr};
+                border: none;
+            }}
+        """)
+        input_style = f"""
+            QLineEdit {{
+                background: {input_bg}; border: 1px solid {input_border};
+                border-radius: 3px; padding: 3px 8px;
+                font-family: {font}; font-size: 13px; color: {input_color};
+            }}
+            QLineEdit:focus {{ border-color: {accent}; }}
+        """
+        self.find_input.setStyleSheet(input_style)
+        self.replace_input.setStyleSheet(input_style)
+
+        self.find_replace_bar.findChild(QFrame, "findPanel").setStyleSheet(f"""
+            QFrame#findPanel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        small_btn_style = f"""
+            QPushButton {{
+                background: {btn_bg}; color: {btn_color};
+                border: none; border-radius: 3px;
+                font-family: {font}; font-size: 14px; font-weight: 500;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+            QPushButton:pressed {{ background: {btn_hover}; }}
+        """
+        for btn in [self.find_prev_btn, self.find_next_btn, self.find_close_btn,
+                     self.replace_btn, self.replace_all_btn, self.toggle_replace_btn]:
+            btn.setStyleSheet(small_btn_style)
+
+        # 模式按钮（Aa, ab, .*）共用选中态样式
+        mode_btn_style = f"""
+            QPushButton {{
+                background: {btn_bg}; color: {btn_color};
+                border: 1px solid transparent; border-radius: 3px;
+                font-family: 'Consolas','SF Mono','Menlo',monospace;
+                font-size: 12px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+            QPushButton:checked {{
+                background: {accent_bg}; color: {accent};
+                border-color: {accent};
+            }}
+        """
+        for btn in [self.case_btn, self.word_btn, self.regex_btn]:
+            btn.setStyleSheet(mode_btn_style)
+        self.find_count_label.setStyleSheet(
+            f"color: {count_color}; font-size: 12px; background: transparent; border: none;"
+        )
+
+    def _toggle_replace_row(self):
+        visible = self.replace_row_widget.isVisible()
+        self.replace_row_widget.setVisible(not visible)
+        self.toggle_replace_btn.setText("▼" if not visible else "▶")
+
+    def _on_case_toggled(self, checked):
+        self._find_case_sensitive = checked
+        self._update_find_count()
+
+    def _on_word_toggled(self, checked):
+        self._find_whole_word = checked
+        self._update_find_count()
+
+    def _on_regex_toggled(self, checked):
+        self._find_regex_mode = checked
+        self._update_find_count()
+
+    def _on_find_text_changed(self):
+        self._update_find_count()
+
+    def toggle_find(self):
+        """Ctrl+F：打开/聚焦查找面板"""
+        if not self.document.has_file:
+            return
+        if self.find_replace_bar.isVisible():
+            self.find_input.setFocus()
+            self.find_input.selectAll()
+            return
+        self.find_replace_bar.show()
+        self._apply_find_bar_style()
+        self.find_input.setFocus()
+        selected = self.editor.textCursor().selectedText()
+        if selected:
+            self.find_input.setText(selected)
+        self.find_input.selectAll()
+        self._update_find_count()
+
+    def _close_find_replace(self):
+        self.find_replace_bar.hide()
+        self._clear_find_highlights()
+        self.editor.setFocus()
+
+    def _get_find_matches(self):
+        """获取所有匹配位置（支持大小写、全字、正则）"""
+        import re
+        keyword = self.find_input.text()
+        if not keyword:
+            return []
+        text = self.editor.toPlainText()
+        flags = 0 if self._find_case_sensitive else re.IGNORECASE
+
+        if self._find_regex_mode:
+            try:
+                pattern = keyword
+                if self._find_whole_word:
+                    pattern = r'\b' + pattern + r'\b'
+                return [(m.start(), m.end()) for m in re.finditer(pattern, text, flags)]
+            except re.error:
+                return []
+        else:
+            pattern = re.escape(keyword)
+            if self._find_whole_word:
+                pattern = r'\b' + pattern + r'\b'
+            try:
+                return [(m.start(), m.end()) for m in re.finditer(pattern, text, flags)]
+            except re.error:
+                return []
+
+    def _find_next(self):
+        matches = self._get_find_matches()
+        if not matches:
+            return
+        cursor = self.editor.textCursor()
+        current_pos = cursor.position()
+        for start, end in matches:
+            if start >= current_pos:
+                self._select_range(start, end)
+                self._update_find_count()
+                return
+        self._select_range(matches[0][0], matches[0][1])
+        self._update_find_count()
+
+    def _find_prev(self):
+        matches = self._get_find_matches()
+        if not matches:
+            return
+        cursor = self.editor.textCursor()
+        current_pos = cursor.selectionStart()
+        for start, end in reversed(matches):
+            if end <= current_pos:
+                self._select_range(start, end)
+                self._update_find_count()
+                return
+        self._select_range(matches[-1][0], matches[-1][1])
+        self._update_find_count()
+
+    def _select_range(self, start, end):
+        cursor = self.editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        self.editor.setTextCursor(cursor)
+        self.editor.ensureCursorVisible()
+
+    def _replace_current(self):
+        import re
+        keyword = self.find_input.text()
+        replacement = self.replace_input.text()
+        if not keyword:
+            return
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            selected = cursor.selectedText()
+            is_match = False
+            if self._find_regex_mode:
+                try:
+                    is_match = bool(re.fullmatch(keyword, selected))
+                except re.error:
+                    pass
+            else:
+                is_match = selected == keyword
+            if is_match:
+                if self._find_regex_mode:
+                    try:
+                        new_text = re.sub(keyword, replacement, selected)
+                    except re.error:
+                        new_text = replacement
+                else:
+                    new_text = replacement
+                cursor.insertText(new_text)
+                self.editor.setTextCursor(cursor)
+        self._find_next()
+        self._update_find_count()
+
+    def _replace_all(self):
+        import re
+        keyword = self.find_input.text()
+        replacement = self.replace_input.text()
+        if not keyword:
+            return
+        text = self.editor.toPlainText()
+        if self._find_regex_mode:
+            try:
+                new_text, count = re.subn(keyword, replacement, text)
+            except re.error:
+                self.find_count_label.setText("正则错误")
+                return
+        else:
+            count = text.count(keyword)
+            new_text = text.replace(keyword, replacement)
+        if count == 0:
+            return
+        cursor = self.editor.textCursor()
+        pos = cursor.position()
+        self.editor.setPlainText(new_text)
+        cursor = self.editor.textCursor()
+        cursor.setPosition(min(pos, len(new_text)))
+        self.editor.setTextCursor(cursor)
+        self.find_count_label.setText(f"已替换 {count} 个")
+
+    def _update_find_count(self):
+        keyword = self.find_input.text()
+        if not keyword:
+            self.find_count_label.setText("")
+            return
+        matches = self._get_find_matches()
+        count = len(matches)
+        if self._find_regex_mode and count == 0:
+            import re
+            try:
+                re.compile(keyword)
+                self.find_count_label.setText("无匹配")
+            except re.error:
+                self.find_count_label.setText("正则无效")
+        elif count == 0:
+            self.find_count_label.setText("无匹配")
+        else:
+            self.find_count_label.setText(f"{count} 个匹配")
+
+    def _clear_find_highlights(self):
+        cursor = self.editor.textCursor()
+        cursor.clearSelection()
+        self.editor.setTextCursor(cursor)
 
     def _setup_theme_menu(self):
         from models.themes import PreviewThemes
@@ -232,10 +645,37 @@ class MarkdownWidget(QFrame):
 
         self.vBoxLayout.addWidget(self.status_bar)
 
+    def _setup_shortcuts(self):
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+
+        QShortcut(QKeySequence("Ctrl+N"), self, self.new_file)
+        QShortcut(QKeySequence("Ctrl+O"), self, self.open_file_dialog)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._shortcut_save)
+        QShortcut(QKeySequence("Ctrl+="), self, self.zoom_in)
+        QShortcut(QKeySequence("Ctrl++"), self, self.zoom_in)
+        QShortcut(QKeySequence("Ctrl+-"), self, self.zoom_out)
+        QShortcut(QKeySequence("Ctrl+0"), self, self.zoom_reset)
+        QShortcut(QKeySequence("Ctrl+Shift+E"), self, self.toggle_editor_fullscreen)
+        QShortcut(QKeySequence("Ctrl+Shift+P"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("F11"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("Ctrl+F"), self, self.toggle_find)
+        QShortcut(QKeySequence("Escape"), self, self._close_find_replace)
+
+    def _shortcut_save(self):
+        """Ctrl+S：有路径直接保存，无路径弹出另存为"""
+        if not self.document.has_file:
+            return
+        if self.document.file_path:
+            self.save_file()
+        else:
+            self.save_file_dialog()
+
     def _connect_signals(self):
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self.update_status_bar)
 
+        self._setup_shortcuts()
         self._update_command_bar_enabled()
         self._update_history_menu()
         self.update_editor_style()
@@ -414,7 +854,13 @@ class MarkdownWidget(QFrame):
         self._preview_updating = True
 
         html = self.controller.render_preview(is_dark=isDarkTheme())
-        self.preview.setHtml(html)
+
+        from PyQt5.QtCore import QUrl
+        if self.document.file_path:
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+        else:
+            base_url = QUrl.fromLocalFile(os.getcwd() + '/')
+        self.preview.setHtml(html, base_url)
 
         self.controller._cached_html_template = html
         self._last_md5 = current_md5
