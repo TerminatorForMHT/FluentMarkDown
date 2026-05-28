@@ -7,12 +7,12 @@ from PyQt5.QtWidgets import (
     QTextEdit, QVBoxLayout, QHBoxLayout, QFrame, QWidget, QStatusBar,
     QFileDialog, QSplitter, QApplication, QLineEdit, QPushButton
 )
-from PyQt5.QtCore import Qt, QPoint, QTimer, QCryptographicHash, QEvent
+from PyQt5.QtCore import Qt, QPoint, QTimer, QCryptographicHash, QEvent, pyqtSlot
 from PyQt5.QtGui import QPainterPath, QRegion, QColor, QTextCursor, QTextCharFormat
 
 from qfluentwidgets import (
-    FluentIcon, CommandBar, TransparentPushButton, CardWidget,
-    ComboBox, BodyLabel, SingleDirectionScrollArea, isDarkTheme, MessageBox,
+    FluentIcon, CommandBar, TransparentPushButton, TransparentToolButton, CardWidget,
+    ComboBox, BodyLabel, isDarkTheme, MessageBox,
     DropDownPushButton, RoundMenu, Action
 )
 from qframelesswindow.webengine import FramelessWebEngineView
@@ -20,6 +20,8 @@ from qframelesswindow.webengine import FramelessWebEngineView
 from models.document import MarkdownDocument
 from controllers.editor_controller import EditorController
 from controllers.export_controller import ExportController
+from views.line_number_editor import LineNumberEditor
+from views.syntax_highlighter import MarkdownHighlighter
 
 
 class MarkdownWidget(QFrame):
@@ -27,6 +29,8 @@ class MarkdownWidget(QFrame):
 
     PREVIEW_RADIUS = 8
     PREVIEW_UPDATE_DELAY = 300
+    PREVIEW_UPDATE_DELAY_LARGE = 600  # 大文件用更长 debounce
+    LARGE_FILE_THRESHOLD = 5000  # 超过此字符数视为大文件
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -68,48 +72,68 @@ class MarkdownWidget(QFrame):
     def _setup_command_bar(self):
         self.command_bar = CommandBar(self)
 
-        self._add_command_button('new', FluentIcon.ADD, "新建", self.new_file)
-        self._add_command_button('open', FluentIcon.FOLDER, "打开", self.open_file_dialog)
+        # ── 文件 ──
+        self._add_icon_button('new', FluentIcon.ADD, "新建 Ctrl+N", self.new_file)
+        self._add_icon_button('open', FluentIcon.FOLDER, "打开 Ctrl+O", self.open_file_dialog)
+        self._add_icon_button('save', FluentIcon.SAVE, "保存 Ctrl+S", self.save_file_dialog)
 
         self._history_menu = RoundMenu(parent=self)
         recent_button = DropDownPushButton(FluentIcon.HISTORY, "最近", self)
         recent_button.setMenu(self._history_menu)
         self.command_bar.addWidget(recent_button)
 
-        self._add_command_button('save', FluentIcon.SAVE, "保存", self.save_file_dialog)
+        self.command_bar.addSeparator()
+
+        # ── 格式 ──
+        format_menu = RoundMenu(parent=self)
+        format_menu.addAction(Action(FluentIcon.FONT, "加粗  Ctrl+B", triggered=self._toggle_bold))
+        format_menu.addAction(Action(FluentIcon.ALIGNMENT, "斜体  Ctrl+I", triggered=self._toggle_italic))
+        format_menu.addAction(Action(FluentIcon.REMOVE, "删除线", triggered=self._insert_strikethrough))
+        format_menu.addSeparator()
+        format_menu.addAction(Action(FluentIcon.CODE, "行内代码  Ctrl+Shift+K", triggered=self._insert_code))
+        format_menu.addAction(Action(FluentIcon.COMMAND_PROMPT, "代码块", triggered=self._insert_code_block))
+        format_menu.addSeparator()
+        format_menu.addAction(Action(FluentIcon.LINK, "链接  Ctrl+K", triggered=self._insert_link))
+        format_menu.addAction(Action(FluentIcon.PHOTO, "插入图片", triggered=self.insert_image))
+        format_menu.addSeparator()
+        format_menu.addAction(Action(FluentIcon.FONT_SIZE, "标题", triggered=self._insert_heading))
+        format_menu.addAction(Action(FluentIcon.MENU, "列表", triggered=self._insert_list_item))
+        format_menu.addAction(Action(FluentIcon.CHAT, "引用", triggered=self._insert_quote))
+
+        format_button = DropDownPushButton(FluentIcon.EDIT, "格式", self)
+        format_button.setMenu(format_menu)
+        self.command_bar.addWidget(format_button)
 
         self.command_bar.addSeparator()
 
-        self._add_command_button('copy', FluentIcon.COPY, "复制", self.copy)
-        self._add_command_button('paste', FluentIcon.PASTE, "粘贴", self.paste)
+        # ── 视图 ──
+        self._add_icon_button('fullscreen', FluentIcon.FULL_SCREEN, "全屏阅读", self.toggle_fullscreen)
+        self._add_icon_button('fullscreen_edit', FluentIcon.EDIT, "全屏编辑", self.toggle_editor_fullscreen)
+        self._add_icon_button('zoom_in', FluentIcon.ZOOM_IN, "放大", self.zoom_in)
+        self._add_icon_button('zoom_out', FluentIcon.ZOOM_OUT, "缩小", self.zoom_out)
 
         self.command_bar.addSeparator()
 
-        self._add_command_button('fullscreen', FluentIcon.ZOOM_IN, "全屏阅读", self.toggle_fullscreen)
-        self._add_command_button('fullscreen_edit', FluentIcon.EDIT, "全屏编辑", self.toggle_editor_fullscreen)
-
-        self.command_bar.addSeparator()
-
+        # ── 主题 ──
         self._setup_theme_menu()
 
         self.command_bar.addSeparator()
 
-        self._add_command_button('image', FluentIcon.PHOTO, "插入图片", self.insert_image)
-
-        self.command_bar.addSeparator()
-
-        self._add_command_button('zoom_in', FluentIcon.ZOOM_IN, "放大", self.zoom_in)
-        self._add_command_button('zoom_out', FluentIcon.ZOOM_OUT, "缩小", self.zoom_out)
-        self._add_command_button('zoom_reset', FluentIcon.HOME, "重置", self.zoom_reset)
-
-        self.command_bar.addSeparator()
-
-        self._add_command_button('export', FluentIcon.SHARE, "导出", self.export_file)
+        # ── 导出 ──
+        self._add_icon_button('export', FluentIcon.SHARE, "导出", self.export_file)
 
         self.vBoxLayout.addWidget(self.command_bar)
 
     def _add_command_button(self, name, icon, text, callback):
         button = TransparentPushButton(icon, text)
+        button.clicked.connect(callback)
+        self.command_bar.addWidget(button)
+        self._command_bar_buttons[name] = button
+
+    def _add_icon_button(self, name, icon, tooltip, callback):
+        button = TransparentToolButton(icon)
+        button.setToolTip(tooltip)
+        button.setFixedSize(36, 30)
         button.clicked.connect(callback)
         self.command_bar.addWidget(button)
         self._command_bar_buttons[name] = button
@@ -525,6 +549,119 @@ class MarkdownWidget(QFrame):
         cursor.clearSelection()
         self.editor.setTextCursor(cursor)
 
+    # ─── Markdown 格式化快捷操作 ───
+
+    def _wrap_selection(self, wrapper):
+        """用 wrapper 包裹选中文本，若已包裹则移除"""
+        cursor = self.editor.textCursor()
+        selected = cursor.selectedText()
+        wrap_len = len(wrapper)
+
+        if selected.startswith(wrapper) and selected.endswith(wrapper) and len(selected) > wrap_len * 2:
+            cursor.insertText(selected[wrap_len:-wrap_len])
+        elif selected:
+            cursor.insertText(f"{wrapper}{selected}{wrapper}")
+        else:
+            pos = cursor.position()
+            cursor.insertText(f"{wrapper}{wrapper}")
+            cursor.setPosition(pos + wrap_len)
+            self.editor.setTextCursor(cursor)
+
+    def _toggle_bold(self):
+        if not self.document.has_file:
+            return
+        self._wrap_selection("**")
+
+    def _toggle_italic(self):
+        if not self.document.has_file:
+            return
+        self._wrap_selection("*")
+
+    def _insert_link(self):
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        selected = cursor.selectedText()
+        if selected:
+            cursor.insertText(f"[{selected}](url)")
+            cursor.movePosition(QTextCursor.Left, QTextCursor.MoveAnchor, 1)
+            cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor, 3)
+            self.editor.setTextCursor(cursor)
+        else:
+            pos = cursor.position()
+            cursor.insertText("[text](url)")
+            cursor.setPosition(pos + 1)
+            cursor.setPosition(pos + 5, QTextCursor.KeepAnchor)
+            self.editor.setTextCursor(cursor)
+
+    def _insert_code(self):
+        if not self.document.has_file:
+            return
+        self._wrap_selection("`")
+
+    def _insert_heading(self):
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        block_text = cursor.block().text()
+        import re
+        heading_match = re.match(r'^(#{1,6})\s', block_text)
+        if heading_match:
+            level = len(heading_match.group(1))
+            if level < 6:
+                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, level)
+                cursor.insertText("#" * (level + 1))
+            else:
+                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, level + 1)
+                cursor.removeSelectedText()
+        else:
+            cursor.insertText("# ")
+        self.editor.setTextCursor(cursor)
+
+    def _insert_list_item(self):
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        block_text = cursor.block().text()
+        if block_text.lstrip().startswith("- "):
+            pass
+        else:
+            cursor.insertText("- ")
+        self.editor.setTextCursor(cursor)
+
+    def _insert_quote(self):
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        block_text = cursor.block().text()
+        if block_text.startswith("> "):
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 2)
+            cursor.removeSelectedText()
+        else:
+            cursor.insertText("> ")
+        self.editor.setTextCursor(cursor)
+
+    def _insert_code_block(self):
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        selected = cursor.selectedText()
+        if selected:
+            cursor.insertText(f"```\n{selected}\n```")
+        else:
+            pos = cursor.position()
+            cursor.insertText("```\n\n```")
+            cursor.setPosition(pos + 4)
+            self.editor.setTextCursor(cursor)
+
+    def _insert_strikethrough(self):
+        if not self.document.has_file:
+            return
+        self._wrap_selection("~~")
+
     def _setup_theme_menu(self):
         from models.themes import PreviewThemes
 
@@ -565,16 +702,15 @@ class MarkdownWidget(QFrame):
         self.editor_layout.addWidget(self.splitter, 1)
         self.card_container_layout.addWidget(self.editor_card, 1)
 
-        self.editor = QTextEdit()
+        self.editor = LineNumberEditor()
         self.editor.setPlaceholderText("Write Markdown here...")
-        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.editor.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.editor.installEventFilter(self)
 
-        self.scroll_area = SingleDirectionScrollArea(orient=Qt.Vertical, parent=self.editor_card)
-        self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
-        self.scroll_area.setWidget(self.editor)
-        self.scroll_area.setWidgetResizable(True)
+        # 语法高亮器
+        is_dark = isDarkTheme()
+        self._highlighter = MarkdownHighlighter(self.editor.document(), is_dark)
+        self.editor.set_dark_mode(is_dark)
 
         self.preview_container = QFrame(self.editor_card)
         self.preview_container.setObjectName("previewContainer")
@@ -592,6 +728,21 @@ class MarkdownWidget(QFrame):
         self.preview = FramelessWebEngineView(self.preview_container)
         self.preview.setAttribute(Qt.WA_TranslucentBackground, True)
         self.preview.setStyleSheet("background: transparent; border: none;")
+
+        # 自定义 Page：外部链接用系统浏览器打开
+        from PyQt5.QtWebEngineWidgets import QWebEnginePage
+        from PyQt5.QtGui import QDesktopServices
+
+        class ExternalLinkPage(QWebEnginePage):
+            def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+                if nav_type == QWebEnginePage.NavigationTypeLinkClicked:
+                    QDesktopServices.openUrl(url)
+                    return False
+                return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+        custom_page = ExternalLinkPage(self.preview)
+        self.preview.setPage(custom_page)
+
         try:
             self.preview.page().setBackgroundColor(QColor(0, 0, 0, 0))
         except Exception:
@@ -605,7 +756,7 @@ class MarkdownWidget(QFrame):
 
         self.preview_layout.addWidget(self.preview)
 
-        self.splitter.addWidget(self.scroll_area)
+        self.splitter.addWidget(self.editor)
         self.splitter.addWidget(self.preview_container)
         self.splitter.setSizes([500, 500])
         self.splitter.setStretchFactor(0, 1)
@@ -661,6 +812,10 @@ class MarkdownWidget(QFrame):
         QShortcut(QKeySequence("F11"), self, self.toggle_fullscreen)
         QShortcut(QKeySequence("Ctrl+F"), self, self.toggle_find)
         QShortcut(QKeySequence("Escape"), self, self._close_find_replace)
+        QShortcut(QKeySequence("Ctrl+B"), self, self._toggle_bold)
+        QShortcut(QKeySequence("Ctrl+I"), self, self._toggle_italic)
+        QShortcut(QKeySequence("Ctrl+K"), self, self._insert_link)
+        QShortcut(QKeySequence("Ctrl+Shift+K"), self, self._insert_code)
 
     def _shortcut_save(self):
         """Ctrl+S：有路径直接保存，无路径弹出另存为"""
@@ -674,6 +829,7 @@ class MarkdownWidget(QFrame):
     def _connect_signals(self):
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self.update_status_bar)
+        self.editor.verticalScrollBar().valueChanged.connect(self._sync_preview_scroll)
 
         self._setup_shortcuts()
         self._update_command_bar_enabled()
@@ -823,14 +979,16 @@ class MarkdownWidget(QFrame):
         if not self.document.has_file:
             return
         self.document.is_modified = True
-        self.controller.set_content(self.editor.toPlainText())
+        content = self.editor.toPlainText()
+        self.controller.set_content(content)
         self.update_status_bar()
 
         if self._preview_updating:
             self._preview_dirty = True
             return
+        delay = self.PREVIEW_UPDATE_DELAY_LARGE if len(content) > self.LARGE_FILE_THRESHOLD else self.PREVIEW_UPDATE_DELAY
         self._preview_timer.stop()
-        self._preview_timer.start(self.PREVIEW_UPDATE_DELAY)
+        self._preview_timer.start(delay)
 
     def _do_preview_update(self):
         if not self.document.has_file:
@@ -845,24 +1003,83 @@ class MarkdownWidget(QFrame):
 
     def update_preview(self):
         content = self.controller.get_content()
-        current_md5 = QCryptographicHash.hash(content.encode('utf-8'), QCryptographicHash.Md5).toHex().data().decode()
+        content_bytes = content.encode('utf-8')
+        current_md5 = QCryptographicHash.hash(content_bytes, QCryptographicHash.Md5).toHex().data().decode()
 
-        if current_md5 == self._last_md5 and self.controller._cached_html_template:
-            self.preview.setHtml(self.controller._cached_html_template)
+        if current_md5 == self._last_md5:
             return
 
         self._preview_updating = True
+        is_dark = isDarkTheme()
 
-        html = self.controller.render_preview(is_dark=isDarkTheme())
-
-        from PyQt5.QtCore import QUrl
-        if self.document.file_path:
-            base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+        # 增量更新：如果页面已加载且只是内容变化，用 JS 替换 DOM 而非重载整个页面
+        if self._last_md5 is not None and hasattr(self, '_preview_loaded') and self._preview_loaded:
+            import markdown
+            html_body = markdown.markdown(content, extensions=['fenced_code', 'extra', 'tables'])
+            html_body = self.controller._convert_image_paths(html_body)
+            # 转义 JS 字符串中的特殊字符
+            escaped = html_body.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+            js = f'''
+                (function() {{
+                    var el = document.querySelector(".scroll");
+                    if (el) {{
+                        var scrollRatio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
+                        el.innerHTML = `{escaped}`;
+                        document.querySelectorAll("pre code").forEach(function(block) {{
+                            if (!block.classList.contains("language-mermaid")) {{
+                                try {{ hljs.highlightElement(block); }} catch(e) {{}}
+                            }}
+                        }});
+                        var mermaidBlocks = document.querySelectorAll("pre code.language-mermaid");
+                        if (mermaidBlocks.length > 0) {{
+                            try {{
+                                mermaidBlocks.forEach(function(block, idx) {{
+                                    var pre = block.parentElement;
+                                    var container = document.createElement("div");
+                                    container.className = "mermaid";
+                                    container.id = "mermaid-" + idx;
+                                    container.textContent = block.textContent;
+                                    pre.replaceWith(container);
+                                }});
+                                mermaid.run();
+                            }} catch(e) {{}}
+                        }}
+                        document.querySelectorAll("pre").forEach(function(pre) {{
+                            if (pre.querySelector(".copy-button")) return;
+                            var btn = document.createElement("button");
+                            btn.className = "copy-button";
+                            btn.textContent = "复制";
+                            pre.appendChild(btn);
+                            btn.addEventListener("click", function() {{
+                                var code = pre.querySelector("code");
+                                if (!code) return;
+                                var ta = document.createElement("textarea");
+                                ta.value = code.textContent;
+                                ta.style.cssText = "position:fixed;left:-9999px";
+                                document.body.appendChild(ta);
+                                ta.select();
+                                try {{ document.execCommand("copy"); btn.textContent = "已复制"; btn.classList.add("copied"); }} catch(e) {{ btn.textContent = "失败"; }}
+                                document.body.removeChild(ta);
+                                setTimeout(function() {{ btn.textContent = "复制"; btn.classList.remove("copied"); }}, 2000);
+                            }});
+                        }});
+                        var maxScroll = el.scrollHeight - el.clientHeight;
+                        el.scrollTop = maxScroll * scrollRatio;
+                    }}
+                }})();
+            '''
+            self.preview.page().runJavaScript(js)
         else:
-            base_url = QUrl.fromLocalFile(os.getcwd() + '/')
-        self.preview.setHtml(html, base_url)
+            html = self.controller.render_preview(is_dark=is_dark)
+            from PyQt5.QtCore import QUrl
+            if self.document.file_path:
+                base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+            else:
+                base_url = QUrl.fromLocalFile(os.getcwd() + '/')
+            self.preview.setHtml(html, base_url)
+            self._preview_loaded = True
 
-        self.controller._cached_html_template = html
+        self.controller._cached_html_template = None
         self._last_md5 = current_md5
         self._preview_updating = False
 
@@ -875,28 +1092,66 @@ class MarkdownWidget(QFrame):
     def update_editor_style(self):
         is_dark = isDarkTheme()
         size = self.controller.font_size
+        text_color = "#ffffff" if is_dark else "#333333"
+        cursor_width = 3 if is_dark else 2
+
         if is_dark:
-            self.editor.setStyleSheet(f'''
-                background-color: transparent;
-                border: 1px solid transparent;
-                border-radius: 8px 0px 0px 8px;
-                padding: 10px;
-                color: #ffffff;
-                font-size: {size}px;
-                selection-background-color: rgba(100, 149, 237, 0.3);
-            ''')
-            self.editor.setCursorWidth(3)
+            sb_track = "#3d3d3d"
+            sb_thumb = "#5d5d5d"
+            sb_hover = "#7d7d7d"
         else:
-            self.editor.setStyleSheet(f'''
+            sb_track = "#f1f1f1"
+            sb_thumb = "#c1c1c1"
+            sb_hover = "#a8a8a8"
+
+        self.editor.setStyleSheet(f'''
+            QPlainTextEdit {{
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 8px 0px 0px 8px;
                 padding: 10px;
-                color: #333333;
+                color: {text_color};
                 font-size: {size}px;
                 selection-background-color: rgba(100, 149, 237, 0.3);
-            ''')
-            self.editor.setCursorWidth(2)
+            }}
+        ''')
+        self.editor.verticalScrollBar().setStyleSheet(f'''
+            QScrollBar:vertical {{
+                background: {sb_track};
+                width: 8px;
+                border: none;
+                border-radius: 4px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {sb_thumb};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {sb_hover};
+            }}
+            QScrollBar::add-line:vertical {{
+                height: 0px;
+                subcontrol-position: bottom;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                subcontrol-position: top;
+                subcontrol-origin: margin;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        ''')
+        self.editor.setCursorWidth(cursor_width)
+
+        # 同步暗色模式到行号和高亮器
+        self.editor.set_dark_mode(is_dark)
+        if hasattr(self, '_highlighter'):
+            self._highlighter.set_dark_mode(is_dark)
 
     def update_status_bar(self):
         text = self.editor.toPlainText()
@@ -998,7 +1253,6 @@ class MarkdownWidget(QFrame):
         """恢复到左右分栏的默认状态"""
         self.editor.show()
         self.preview_container.show()
-        self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         w = self.splitter.width()
         self.splitter.setSizes([w // 2, w // 2])
         self.editor_layout.setContentsMargins(1, 1, 1, 1)
@@ -1016,7 +1270,6 @@ class MarkdownWidget(QFrame):
             self.splitter.setSizes([0, self.splitter.width()])
             self.editor_layout.setContentsMargins(0, 0, 0, 0)
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
-            self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
             self.is_fullscreen = True
             self.is_editor_fullscreen = False
         else:
@@ -1034,7 +1287,6 @@ class MarkdownWidget(QFrame):
             self.splitter.setSizes([w, 0])
             self.editor_layout.setContentsMargins(0, 0, 0, 0)
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
-            self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
             self.is_editor_fullscreen = True
             self.is_fullscreen = False
         else:
@@ -1092,13 +1344,49 @@ class MarkdownWidget(QFrame):
 
         success, message = False, ""
         if ext == '.pdf':
-            success, message = ExportController.export_pdf(file_path, content)
+            self._export_pdf_via_webengine(file_path)
+            return
         elif ext == '.docx':
             success, message = ExportController.export_word(file_path, content)
         elif ext == '.html':
             success, message = ExportController.export_html(file_path, content)
 
         self._show_info_dialog("导出成功" if success else "导出失败", message)
+
+    def _export_pdf_via_webengine(self, file_path):
+        """通过 WebEngineView 导出 PDF，完美支持中文和样式"""
+        from PyQt5.QtCore import QMarginsF, QUrl
+        from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+        from PyQt5.QtGui import QPageLayout, QPageSize
+
+        html = self.controller.render_preview(is_dark=False)
+        # 去掉容器高度限制和 overflow 裁剪，让内容自然展开
+        html = html.replace('height: 100%;', 'height: auto;')
+        html = html.replace('overflow: hidden;', 'overflow: visible;')
+        html = html.replace('overflow-y: auto;', 'overflow-y: visible;')
+        temp_view = QWebEngineView()
+        if self.document.file_path:
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+        else:
+            base_url = QUrl.fromLocalFile(os.getcwd() + '/')
+
+        def on_load_finished(ok):
+            if not ok:
+                self._show_info_dialog("导出失败", "页面加载失败")
+                temp_view.deleteLater()
+                return
+            page_layout = QPageLayout(
+                QPageSize(QPageSize.A4),
+                QPageLayout.Portrait,
+                QMarginsF(15, 15, 15, 15)
+            )
+            temp_view.page().printToPdf(
+                lambda data: self._on_pdf_exported(data, file_path, temp_view),
+                page_layout
+            )
+
+        temp_view.loadFinished.connect(on_load_finished)
+        temp_view.setHtml(html, base_url)
 
     def _create_fluent_dialog(self, width, height):
         """创建 Fluent Design 风格弹窗基础框架"""
@@ -1171,6 +1459,17 @@ class MarkdownWidget(QFrame):
             "subtle_border": "rgba(255,255,255,0.07)" if is_dark else "rgba(0,0,0,0.06)",
             "divider": "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)",
         }
+
+    def _on_pdf_exported(self, pdf_data, file_path, temp_view):
+        """PDF 导出回调"""
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(pdf_data.data())
+            self._show_info_dialog("导出成功", f"PDF 已成功导出到:\n{file_path}")
+        except Exception as e:
+            self._show_info_dialog("导出失败", f"写入 PDF 文件时出错:\n{str(e)}")
+        finally:
+            temp_view.deleteLater()
 
     def _show_info_dialog(self, title, content):
         from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout
@@ -1336,6 +1635,19 @@ class MarkdownWidget(QFrame):
                 else:
                     self.save_file_dialog()
         return True
+
+    def _sync_preview_scroll(self):
+        """编辑器滚动时同步预览滚动位置"""
+        scrollbar = self.editor.verticalScrollBar()
+        max_val = scrollbar.maximum()
+        if max_val <= 0:
+            return
+        ratio = scrollbar.value() / max_val
+        js = f"syncScrollTo({ratio});"
+        try:
+            self.preview.page().runJavaScript(js)
+        except Exception:
+            pass
 
     def _updatePreviewRoundMask(self):
         if not hasattr(self, "preview_container"):
