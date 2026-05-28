@@ -4,13 +4,23 @@
 
 ## 界面展示
 
-### 浅色主题
+### Windows
+#### 浅色主题
 
-![浅色主题](resources/img/readme/Light.png)
+![浅色主题](resources/img/readme/WinLight.png)
 
-### 深色主题
+#### 深色主题
 
-![深色主题](resources/img/readme/Dark.png)
+![深色主题](resources/img/readme/WinDark.png)
+
+### MacOS
+#### 浅色主题
+
+![浅色主题](resources/img/readme/MacLight.png)
+
+#### 深色主题
+
+![深色主题](resources/img/readme/MacDark.png)
 
 ## 功能特性
 
