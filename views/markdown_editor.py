@@ -4,10 +4,11 @@ import tempfile
 import uuid
 
 from PyQt5.QtWidgets import (
-    QTextEdit, QVBoxLayout, QFrame, QWidget, QStatusBar, QFileDialog, QSplitter, QApplication
+    QTextEdit, QVBoxLayout, QHBoxLayout, QFrame, QWidget, QStatusBar,
+    QFileDialog, QSplitter, QApplication, QLineEdit, QPushButton
 )
 from PyQt5.QtCore import Qt, QPoint, QTimer, QCryptographicHash, QEvent
-from PyQt5.QtGui import QPainterPath, QRegion, QColor
+from PyQt5.QtGui import QPainterPath, QRegion, QColor, QTextCursor, QTextCharFormat
 
 from qfluentwidgets import (
     FluentIcon, CommandBar, TransparentPushButton, CardWidget,
@@ -60,6 +61,7 @@ class MarkdownWidget(QFrame):
         self.vBoxLayout.setSpacing(0)
 
         self._setup_command_bar()
+        self._setup_find_replace_bar()
         self._setup_editor_preview()
         self._setup_status_bar()
 
@@ -111,6 +113,417 @@ class MarkdownWidget(QFrame):
         button.clicked.connect(callback)
         self.command_bar.addWidget(button)
         self._command_bar_buttons[name] = button
+
+    def _setup_find_replace_bar(self):
+        """创建 VS Code 风格的查找替换面板（右侧固定宽度浮动）"""
+        self._find_regex_mode = False
+        self._find_case_sensitive = False
+        self._find_whole_word = False
+
+        self.find_replace_bar = QFrame(self)
+        self.find_replace_bar.setObjectName("findReplaceBar")
+        self.find_replace_bar.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.find_replace_bar.hide()
+
+        outer_layout = QHBoxLayout(self.find_replace_bar)
+        outer_layout.setContentsMargins(0, 4, 0, 4)
+        outer_layout.setSpacing(0)
+
+        # 面板主体容器（固定宽度，左对齐）
+        panel = QFrame()
+        panel.setObjectName("findPanel")
+        panel.setFixedWidth(420)
+
+        # 面板后加弹性占位把它推到最左
+        outer_layout.addWidget(panel)
+        outer_layout.addStretch(1)
+        panel_layout = QHBoxLayout(panel)
+        panel_layout.setContentsMargins(2, 4, 6, 4)
+        panel_layout.setSpacing(0)
+
+        # 左侧折叠箭头
+        self.toggle_replace_btn = QPushButton("▶")
+        self.toggle_replace_btn.setFixedSize(20, 52)
+        self.toggle_replace_btn.setToolTip("切换替换")
+        self.toggle_replace_btn.setCursor(Qt.PointingHandCursor)
+        self.toggle_replace_btn.clicked.connect(self._toggle_replace_row)
+        panel_layout.addWidget(self.toggle_replace_btn, 0, Qt.AlignTop)
+
+        # 右侧行容器
+        rows_widget = QWidget()
+        rows_layout = QVBoxLayout(rows_widget)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(4)
+
+        # === 查找行 ===
+        find_row = QHBoxLayout()
+        find_row.setSpacing(2)
+
+        # 输入框 + 内嵌模式按钮的容器
+        find_input_container = QHBoxLayout()
+        find_input_container.setSpacing(0)
+        find_input_container.setContentsMargins(0, 0, 0, 0)
+
+        self.find_input = QLineEdit()
+        self.find_input.setPlaceholderText("查找")
+        self.find_input.returnPressed.connect(self._find_next)
+        self.find_input.textChanged.connect(self._on_find_text_changed)
+        find_input_container.addWidget(self.find_input, 1)
+
+        # 匹配模式按钮（紧贴输入框右侧）
+        self.case_btn = QPushButton("Aa")
+        self.case_btn.setFixedSize(26, 24)
+        self.case_btn.setCheckable(True)
+        self.case_btn.setToolTip("区分大小写")
+        self.case_btn.setCursor(Qt.PointingHandCursor)
+        self.case_btn.toggled.connect(self._on_case_toggled)
+        find_input_container.addWidget(self.case_btn)
+
+        self.word_btn = QPushButton("ab")
+        self.word_btn.setFixedSize(26, 24)
+        self.word_btn.setCheckable(True)
+        self.word_btn.setToolTip("全字匹配")
+        self.word_btn.setCursor(Qt.PointingHandCursor)
+        self.word_btn.toggled.connect(self._on_word_toggled)
+        find_input_container.addWidget(self.word_btn)
+
+        self.regex_btn = QPushButton(".*")
+        self.regex_btn.setFixedSize(26, 24)
+        self.regex_btn.setCheckable(True)
+        self.regex_btn.setToolTip("正则表达式")
+        self.regex_btn.setCursor(Qt.PointingHandCursor)
+        self.regex_btn.toggled.connect(self._on_regex_toggled)
+        find_input_container.addWidget(self.regex_btn)
+
+        find_row.addLayout(find_input_container, 1)
+
+        # 匹配计数
+        self.find_count_label = BodyLabel("", self)
+        self.find_count_label.setFixedWidth(68)
+        self.find_count_label.setAlignment(Qt.AlignCenter)
+        find_row.addWidget(self.find_count_label)
+
+        # 上一个 / 下一个 / 关闭
+        self.find_prev_btn = QPushButton("↑")
+        self.find_prev_btn.setFixedSize(26, 26)
+        self.find_prev_btn.setToolTip("上一个")
+        self.find_prev_btn.setCursor(Qt.PointingHandCursor)
+        self.find_prev_btn.clicked.connect(self._find_prev)
+        find_row.addWidget(self.find_prev_btn)
+
+        self.find_next_btn = QPushButton("↓")
+        self.find_next_btn.setFixedSize(26, 26)
+        self.find_next_btn.setToolTip("下一个")
+        self.find_next_btn.setCursor(Qt.PointingHandCursor)
+        self.find_next_btn.clicked.connect(self._find_next)
+        find_row.addWidget(self.find_next_btn)
+
+        self.find_close_btn = QPushButton("×")
+        self.find_close_btn.setFixedSize(26, 26)
+        self.find_close_btn.setToolTip("关闭 (Esc)")
+        self.find_close_btn.setCursor(Qt.PointingHandCursor)
+        self.find_close_btn.clicked.connect(self._close_find_replace)
+        find_row.addWidget(self.find_close_btn)
+
+        rows_layout.addLayout(find_row)
+
+        # === 替换行 ===
+        self.replace_row_widget = QWidget()
+        replace_row = QHBoxLayout(self.replace_row_widget)
+        replace_row.setContentsMargins(0, 0, 0, 0)
+        replace_row.setSpacing(2)
+
+        self.replace_input = QLineEdit()
+        self.replace_input.setPlaceholderText("替换")
+        replace_row.addWidget(self.replace_input, 1)
+
+        # 匹配计数位的占位
+        spacer_count = QWidget()
+        spacer_count.setFixedWidth(68)
+        replace_row.addWidget(spacer_count)
+
+        self.replace_btn = QPushButton("⇄")
+        self.replace_btn.setFixedSize(26, 26)
+        self.replace_btn.setToolTip("替换当前")
+        self.replace_btn.setCursor(Qt.PointingHandCursor)
+        self.replace_btn.clicked.connect(self._replace_current)
+        replace_row.addWidget(self.replace_btn)
+
+        self.replace_all_btn = QPushButton("⇄*")
+        self.replace_all_btn.setFixedSize(26, 26)
+        self.replace_all_btn.setToolTip("全部替换")
+        self.replace_all_btn.setCursor(Qt.PointingHandCursor)
+        self.replace_all_btn.clicked.connect(self._replace_all)
+        replace_row.addWidget(self.replace_all_btn)
+
+        # 对齐关闭按钮
+        spacer_close = QWidget()
+        spacer_close.setFixedWidth(26)
+        replace_row.addWidget(spacer_close)
+
+        rows_layout.addWidget(self.replace_row_widget)
+        self.replace_row_widget.hide()
+
+        panel_layout.addWidget(rows_widget, 1)
+
+        self._apply_find_bar_style()
+        self.vBoxLayout.addWidget(self.find_replace_bar)
+
+    def _apply_find_bar_style(self):
+        is_dark = isDarkTheme()
+        bg = "transparent"
+        border_clr = "rgba(255,255,255,0.06)" if is_dark else "rgba(0,0,0,0.08)"
+        input_bg = "rgba(60,60,60,1)" if is_dark else "rgba(255,255,255,1)"
+        input_border = "rgba(255,255,255,0.1)" if is_dark else "rgba(0,0,0,0.12)"
+        input_color = "#cccccc" if is_dark else "#1e1e1e"
+        btn_bg = "transparent"
+        btn_hover = "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)"
+        btn_color = "#cccccc" if is_dark else "#424242"
+        accent = "#0078d4"
+        accent_bg = "rgba(0,120,212,0.15)" if is_dark else "rgba(0,120,212,0.12)"
+        count_color = "rgba(255,255,255,0.45)" if is_dark else "rgba(0,0,0,0.4)"
+        font = "'Segoe UI Variable','Segoe UI',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif"
+
+        self.find_replace_bar.setStyleSheet(f"""
+            QFrame#findReplaceBar {{
+                background: {bg};
+                border-bottom: 1px solid {border_clr};
+                border: none;
+            }}
+        """)
+        input_style = f"""
+            QLineEdit {{
+                background: {input_bg}; border: 1px solid {input_border};
+                border-radius: 3px; padding: 3px 8px;
+                font-family: {font}; font-size: 13px; color: {input_color};
+            }}
+            QLineEdit:focus {{ border-color: {accent}; }}
+        """
+        self.find_input.setStyleSheet(input_style)
+        self.replace_input.setStyleSheet(input_style)
+
+        self.find_replace_bar.findChild(QFrame, "findPanel").setStyleSheet(f"""
+            QFrame#findPanel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        small_btn_style = f"""
+            QPushButton {{
+                background: {btn_bg}; color: {btn_color};
+                border: none; border-radius: 3px;
+                font-family: {font}; font-size: 14px; font-weight: 500;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+            QPushButton:pressed {{ background: {btn_hover}; }}
+        """
+        for btn in [self.find_prev_btn, self.find_next_btn, self.find_close_btn,
+                     self.replace_btn, self.replace_all_btn, self.toggle_replace_btn]:
+            btn.setStyleSheet(small_btn_style)
+
+        # 模式按钮（Aa, ab, .*）共用选中态样式
+        mode_btn_style = f"""
+            QPushButton {{
+                background: {btn_bg}; color: {btn_color};
+                border: 1px solid transparent; border-radius: 3px;
+                font-family: 'Consolas','SF Mono','Menlo',monospace;
+                font-size: 12px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: {btn_hover}; }}
+            QPushButton:checked {{
+                background: {accent_bg}; color: {accent};
+                border-color: {accent};
+            }}
+        """
+        for btn in [self.case_btn, self.word_btn, self.regex_btn]:
+            btn.setStyleSheet(mode_btn_style)
+        self.find_count_label.setStyleSheet(
+            f"color: {count_color}; font-size: 12px; background: transparent; border: none;"
+        )
+
+    def _toggle_replace_row(self):
+        visible = self.replace_row_widget.isVisible()
+        self.replace_row_widget.setVisible(not visible)
+        self.toggle_replace_btn.setText("▼" if not visible else "▶")
+
+    def _on_case_toggled(self, checked):
+        self._find_case_sensitive = checked
+        self._update_find_count()
+
+    def _on_word_toggled(self, checked):
+        self._find_whole_word = checked
+        self._update_find_count()
+
+    def _on_regex_toggled(self, checked):
+        self._find_regex_mode = checked
+        self._update_find_count()
+
+    def _on_find_text_changed(self):
+        self._update_find_count()
+
+    def toggle_find(self):
+        """Ctrl+F：打开/聚焦查找面板"""
+        if not self.document.has_file:
+            return
+        if self.find_replace_bar.isVisible():
+            self.find_input.setFocus()
+            self.find_input.selectAll()
+            return
+        self.find_replace_bar.show()
+        self._apply_find_bar_style()
+        self.find_input.setFocus()
+        selected = self.editor.textCursor().selectedText()
+        if selected:
+            self.find_input.setText(selected)
+        self.find_input.selectAll()
+        self._update_find_count()
+
+    def _close_find_replace(self):
+        self.find_replace_bar.hide()
+        self._clear_find_highlights()
+        self.editor.setFocus()
+
+    def _get_find_matches(self):
+        """获取所有匹配位置（支持大小写、全字、正则）"""
+        import re
+        keyword = self.find_input.text()
+        if not keyword:
+            return []
+        text = self.editor.toPlainText()
+        flags = 0 if self._find_case_sensitive else re.IGNORECASE
+
+        if self._find_regex_mode:
+            try:
+                pattern = keyword
+                if self._find_whole_word:
+                    pattern = r'\b' + pattern + r'\b'
+                return [(m.start(), m.end()) for m in re.finditer(pattern, text, flags)]
+            except re.error:
+                return []
+        else:
+            pattern = re.escape(keyword)
+            if self._find_whole_word:
+                pattern = r'\b' + pattern + r'\b'
+            try:
+                return [(m.start(), m.end()) for m in re.finditer(pattern, text, flags)]
+            except re.error:
+                return []
+
+    def _find_next(self):
+        matches = self._get_find_matches()
+        if not matches:
+            return
+        cursor = self.editor.textCursor()
+        current_pos = cursor.position()
+        for start, end in matches:
+            if start >= current_pos:
+                self._select_range(start, end)
+                self._update_find_count()
+                return
+        self._select_range(matches[0][0], matches[0][1])
+        self._update_find_count()
+
+    def _find_prev(self):
+        matches = self._get_find_matches()
+        if not matches:
+            return
+        cursor = self.editor.textCursor()
+        current_pos = cursor.selectionStart()
+        for start, end in reversed(matches):
+            if end <= current_pos:
+                self._select_range(start, end)
+                self._update_find_count()
+                return
+        self._select_range(matches[-1][0], matches[-1][1])
+        self._update_find_count()
+
+    def _select_range(self, start, end):
+        cursor = self.editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        self.editor.setTextCursor(cursor)
+        self.editor.ensureCursorVisible()
+
+    def _replace_current(self):
+        import re
+        keyword = self.find_input.text()
+        replacement = self.replace_input.text()
+        if not keyword:
+            return
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            selected = cursor.selectedText()
+            is_match = False
+            if self._find_regex_mode:
+                try:
+                    is_match = bool(re.fullmatch(keyword, selected))
+                except re.error:
+                    pass
+            else:
+                is_match = selected == keyword
+            if is_match:
+                if self._find_regex_mode:
+                    try:
+                        new_text = re.sub(keyword, replacement, selected)
+                    except re.error:
+                        new_text = replacement
+                else:
+                    new_text = replacement
+                cursor.insertText(new_text)
+                self.editor.setTextCursor(cursor)
+        self._find_next()
+        self._update_find_count()
+
+    def _replace_all(self):
+        import re
+        keyword = self.find_input.text()
+        replacement = self.replace_input.text()
+        if not keyword:
+            return
+        text = self.editor.toPlainText()
+        if self._find_regex_mode:
+            try:
+                new_text, count = re.subn(keyword, replacement, text)
+            except re.error:
+                self.find_count_label.setText("正则错误")
+                return
+        else:
+            count = text.count(keyword)
+            new_text = text.replace(keyword, replacement)
+        if count == 0:
+            return
+        cursor = self.editor.textCursor()
+        pos = cursor.position()
+        self.editor.setPlainText(new_text)
+        cursor = self.editor.textCursor()
+        cursor.setPosition(min(pos, len(new_text)))
+        self.editor.setTextCursor(cursor)
+        self.find_count_label.setText(f"已替换 {count} 个")
+
+    def _update_find_count(self):
+        keyword = self.find_input.text()
+        if not keyword:
+            self.find_count_label.setText("")
+            return
+        matches = self._get_find_matches()
+        count = len(matches)
+        if self._find_regex_mode and count == 0:
+            import re
+            try:
+                re.compile(keyword)
+                self.find_count_label.setText("无匹配")
+            except re.error:
+                self.find_count_label.setText("正则无效")
+        elif count == 0:
+            self.find_count_label.setText("无匹配")
+        else:
+            self.find_count_label.setText(f"{count} 个匹配")
+
+    def _clear_find_highlights(self):
+        cursor = self.editor.textCursor()
+        cursor.clearSelection()
+        self.editor.setTextCursor(cursor)
 
     def _setup_theme_menu(self):
         from models.themes import PreviewThemes
@@ -232,10 +645,37 @@ class MarkdownWidget(QFrame):
 
         self.vBoxLayout.addWidget(self.status_bar)
 
+    def _setup_shortcuts(self):
+        from PyQt5.QtWidgets import QShortcut
+        from PyQt5.QtGui import QKeySequence
+
+        QShortcut(QKeySequence("Ctrl+N"), self, self.new_file)
+        QShortcut(QKeySequence("Ctrl+O"), self, self.open_file_dialog)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._shortcut_save)
+        QShortcut(QKeySequence("Ctrl+="), self, self.zoom_in)
+        QShortcut(QKeySequence("Ctrl++"), self, self.zoom_in)
+        QShortcut(QKeySequence("Ctrl+-"), self, self.zoom_out)
+        QShortcut(QKeySequence("Ctrl+0"), self, self.zoom_reset)
+        QShortcut(QKeySequence("Ctrl+Shift+E"), self, self.toggle_editor_fullscreen)
+        QShortcut(QKeySequence("Ctrl+Shift+P"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("F11"), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence("Ctrl+F"), self, self.toggle_find)
+        QShortcut(QKeySequence("Escape"), self, self._close_find_replace)
+
+    def _shortcut_save(self):
+        """Ctrl+S：有路径直接保存，无路径弹出另存为"""
+        if not self.document.has_file:
+            return
+        if self.document.file_path:
+            self.save_file()
+        else:
+            self.save_file_dialog()
+
     def _connect_signals(self):
         self.editor.textChanged.connect(self._on_text_changed)
         self.editor.selectionChanged.connect(self.update_status_bar)
 
+        self._setup_shortcuts()
         self._update_command_bar_enabled()
         self._update_history_menu()
         self.update_editor_style()
@@ -414,7 +854,13 @@ class MarkdownWidget(QFrame):
         self._preview_updating = True
 
         html = self.controller.render_preview(is_dark=isDarkTheme())
-        self.preview.setHtml(html)
+
+        from PyQt5.QtCore import QUrl
+        if self.document.file_path:
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+        else:
+            base_url = QUrl.fromLocalFile(os.getcwd() + '/')
+        self.preview.setHtml(html, base_url)
 
         self.controller._cached_html_template = html
         self._last_md5 = current_md5
@@ -473,7 +919,10 @@ class MarkdownWidget(QFrame):
 
     def new_file(self):
         self.document.new()
+        self.editor.blockSignals(True)
         self.editor.clear()
+        self.editor.blockSignals(False)
+        self.document.is_modified = False
         self._hide_welcome_page()
         self._update_command_bar_enabled()
         self._start_auto_save_timer()
@@ -488,8 +937,10 @@ class MarkdownWidget(QFrame):
             return
 
         if self.document.load(file_path):
+            self.editor.blockSignals(True)
             self.editor.setPlainText(self.document.content)
-            self.controller.set_content(self.document.content)
+            self.editor.blockSignals(False)
+            self.document.is_modified = False
             self._hide_welcome_page()
             self._update_command_bar_enabled()
             self._update_history_menu()
@@ -543,29 +994,41 @@ class MarkdownWidget(QFrame):
         from PyQt5.QtCore import QUrl
         return QUrl.fromLocalFile(path).toString()
 
+    def _restore_split_view(self):
+        """恢复到左右分栏的默认状态"""
+        self.editor.show()
+        self.preview_container.show()
+        self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        w = self.splitter.width()
+        self.splitter.setSizes([w // 2, w // 2])
+        self.editor_layout.setContentsMargins(1, 1, 1, 1)
+        self.card_container_layout.setContentsMargins(5, 5, 5, 5)
+        self.is_fullscreen = False
+        self.is_editor_fullscreen = False
+
     def toggle_fullscreen(self):
         if not self.document.has_file:
             return
         if not self.is_fullscreen:
+            # 先恢复所有控件可见性，再进入全屏阅读
+            self.preview_container.show()
             self.editor.hide()
             self.splitter.setSizes([0, self.splitter.width()])
             self.editor_layout.setContentsMargins(0, 0, 0, 0)
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
+            self.scroll_area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
             self.is_fullscreen = True
             self.is_editor_fullscreen = False
         else:
-            self.editor.show()
-            w = self.splitter.width()
-            self.splitter.setSizes([w // 2, w // 2])
-            self.editor_layout.setContentsMargins(1, 1, 1, 1)
-            self.card_container_layout.setContentsMargins(5, 5, 5, 5)
-            self.is_fullscreen = False
+            self._restore_split_view()
         self._updatePreviewRoundMask()
 
     def toggle_editor_fullscreen(self):
         if not self.document.has_file:
             return
         if not self.is_editor_fullscreen:
+            # 先恢复所有控件可见性，再进入全屏编辑
+            self.editor.show()
             self.preview_container.hide()
             w = self.splitter.width()
             self.splitter.setSizes([w, 0])
@@ -575,13 +1038,7 @@ class MarkdownWidget(QFrame):
             self.is_editor_fullscreen = True
             self.is_fullscreen = False
         else:
-            self.preview_container.show()
-            w = self.splitter.width()
-            self.splitter.setSizes([w // 2, w // 2])
-            self.editor_layout.setContentsMargins(1, 1, 1, 1)
-            self.card_container_layout.setContentsMargins(5, 5, 5, 5)
-            self.scroll_area.setStyleSheet("")
-            self.is_editor_fullscreen = False
+            self._restore_split_view()
         self._updatePreviewRoundMask()
 
     def zoom_in(self):
@@ -643,218 +1100,213 @@ class MarkdownWidget(QFrame):
 
         self._show_info_dialog("导出成功" if success else "导出失败", message)
 
-    def _show_info_dialog(self, title, content):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-        from PyQt5.QtCore import Qt
-        
-        dialog = QDialog()
-        dialog.setWindowTitle("")
-        dialog.setFixedSize(400, 180)
-        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        dialog.setAttribute(Qt.WA_TranslucentBackground)
-        
+    def _create_fluent_dialog(self, width, height):
+        """创建 Fluent Design 风格弹窗基础框架"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QGraphicsDropShadowEffect
+        from PyQt5.QtCore import Qt, QPoint
+
         is_dark = isDarkTheme()
-        bg_color = "#1e1e1e" if is_dark else "#ffffff"
-        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
-        title_bar_color = "#252526" if is_dark else "#f0f0f0"
-        
-        central_widget = QWidget(dialog)
-        central_widget.setGeometry(0, 0, 400, 180)
-        central_widget.setStyleSheet(f"""
-            QWidget {{
+
+        class DraggableDialog(QDialog):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self._drag_pos = None
+
+            def mousePressEvent(self, event):
+                if event.button() == Qt.LeftButton:
+                    self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+                    event.accept()
+
+            def mouseMoveEvent(self, event):
+                if self._drag_pos is not None and event.buttons() & Qt.LeftButton:
+                    self.move(event.globalPos() - self._drag_pos)
+                    event.accept()
+
+            def mouseReleaseEvent(self, event):
+                self._drag_pos = None
+
+        dialog = DraggableDialog(self.window())
+        dialog.setWindowTitle("")
+        dialog.setFixedSize(width + 40, height + 40)
+        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        dialog.setAttribute(Qt.WA_TranslucentBackground)
+
+        card = QWidget(dialog)
+        card.setGeometry(20, 10, width, height)
+        card.setObjectName("fluentDialogCard")
+
+        bg_color = "rgba(44, 44, 44, 0.96)" if is_dark else "rgba(255, 255, 255, 0.96)"
+        border_color = "rgba(255, 255, 255, 0.08)" if is_dark else "rgba(0, 0, 0, 0.06)"
+        top_border = "rgba(255, 255, 255, 0.12)" if is_dark else "rgba(255, 255, 255, 0.8)"
+
+        card.setStyleSheet(f"""
+            QWidget#fluentDialogCard {{
                 background-color: {bg_color};
-                border-radius: 12px;
+                border: 1px solid {border_color};
+                border-top: 1px solid {top_border};
+                border-radius: 8px;
             }}
         """)
-        
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(16)
+        shadow.setOffset(0, 1)
+        shadow_color = QColor(0, 0, 0, 70 if is_dark else 35)
+        shadow.setColor(shadow_color)
+        card.setGraphicsEffect(shadow)
+
+        return dialog, card, is_dark
+
+    def _fluent_colors(self, is_dark):
+        """获取 Fluent Design 配色"""
+        return {
+            "title": "#ffffff" if is_dark else "#1a1a1a",
+            "body": "rgba(255,255,255,0.7)" if is_dark else "rgba(0,0,0,0.6)",
+            "accent": "#60CDFF" if is_dark else "#005FB8",
+            "accent_hover": "#4DB8E8" if is_dark else "#004C95",
+            "accent_pressed": "#3AAAD4" if is_dark else "#003A75",
+            "subtle_bg": "rgba(255,255,255,0.06)" if is_dark else "rgba(0,0,0,0.03)",
+            "subtle_hover": "rgba(255,255,255,0.09)" if is_dark else "rgba(0,0,0,0.05)",
+            "subtle_pressed": "rgba(255,255,255,0.04)" if is_dark else "rgba(0,0,0,0.03)",
+            "subtle_border": "rgba(255,255,255,0.07)" if is_dark else "rgba(0,0,0,0.06)",
+            "divider": "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)",
+        }
+
+    def _show_info_dialog(self, title, content):
+        from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtCore import Qt
+
+        dialog, card, is_dark = self._create_fluent_dialog(420, 200)
+        colors = self._fluent_colors(is_dark)
+        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(0)
-        
-        title_bar = QWidget()
-        title_bar.setFixedHeight(36)
-        title_bar.setStyleSheet("background-color: transparent;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 12, 0)
-        
+
+        # 标题
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {text_color};
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 18px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-            }}
-        """)
-        close_btn.clicked.connect(dialog.reject)
-        title_layout.addWidget(close_btn)
-        
-        content_area = QWidget()
-        content_area.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        
+        title_label.setStyleSheet(f"color: {colors['title']}; font-family: {font_family}; font-size: 16px; font-weight: 600; background: transparent; border: none;")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # 内容
         content_label = QLabel(content)
-        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setStyleSheet(f"color: {colors['body']}; font-family: {font_family}; font-size: 13px; line-height: 20px; background: transparent; border: none;")
         content_label.setWordWrap(True)
-        content_layout.addWidget(content_label)
-        
+        layout.addWidget(content_label)
+        layout.addStretch(1)
+
+        # 分割线
+        divider = QWidget()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {colors['divider']}; border: none;")
+        layout.addWidget(divider)
+        layout.addSpacing(16)
+
+        # 按钮
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
         button_layout.addStretch()
-        
+
         ok_btn = QPushButton("确定")
-        ok_btn.setFixedSize(88, 32)
+        ok_btn.setFixedSize(120, 32)
+        ok_btn.setCursor(Qt.PointingHandCursor)
         ok_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #0078d4;
-                color: white;
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
+                background-color: {colors['accent']};
+                color: {"#000000" if is_dark else "#ffffff"};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 600;
+                border: none; border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: #005a9e;
-            }}
-            QPushButton:pressed {{
-                background-color: #004578;
-            }}
+            QPushButton:hover {{ background-color: {colors['accent_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['accent_pressed']}; }}
         """)
         ok_btn.clicked.connect(dialog.accept)
         button_layout.addWidget(ok_btn)
-        
-        content_layout.addLayout(button_layout)
-        
-        layout.addWidget(title_bar)
-        layout.addWidget(content_area)
-        
+
+        layout.addLayout(button_layout)
+
         dialog.exec()
 
     def _show_yes_no_dialog(self, title, content):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QDialog
         from PyQt5.QtCore import Qt
-        
-        dialog = QDialog()
-        dialog.setWindowTitle("")
-        dialog.setFixedSize(450, 200)
-        dialog.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        dialog.setAttribute(Qt.WA_TranslucentBackground)
-        
-        is_dark = isDarkTheme()
-        bg_color = "#1e1e1e" if is_dark else "#ffffff"
-        text_color = "#e0e0e0" if is_dark else "#1a1a1a"
-        title_bar_color = "#252526" if is_dark else "#f0f0f0"
-        
-        central_widget = QWidget(dialog)
-        central_widget.setGeometry(0, 0, 450, 200)
-        central_widget.setStyleSheet(f"""
-            QWidget {{
-                background-color: {bg_color};
-                border-radius: 12px;
-            }}
-        """)
-        
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+
+        dialog, card, is_dark = self._create_fluent_dialog(460, 210)
+        colors = self._fluent_colors(is_dark)
+        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(0)
-        
-        title_bar = QWidget()
-        title_bar.setFixedHeight(36)
-        title_bar.setStyleSheet("background-color: transparent;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 12, 0)
-        
+
+        # 标题
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 14px; font-weight: 600;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {text_color};
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 18px;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-            }}
-        """)
-        close_btn.clicked.connect(dialog.reject)
-        title_layout.addWidget(close_btn)
-        
-        content_area = QWidget()
-        content_area.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        
+        title_label.setStyleSheet(f"color: {colors['title']}; font-family: {font_family}; font-size: 16px; font-weight: 600; background: transparent; border: none;")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # 内容
         content_label = QLabel(content)
-        content_label.setStyleSheet(f"color: {text_color}; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; font-size: 13px;")
+        content_label.setStyleSheet(f"color: {colors['body']}; font-family: {font_family}; font-size: 13px; line-height: 20px; background: transparent; border: none;")
         content_label.setWordWrap(True)
-        content_layout.addWidget(content_label)
-        
+        layout.addWidget(content_label)
+        layout.addStretch(1)
+
+        # 分割线
+        divider = QWidget()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background-color: {colors['divider']}; border: none;")
+        layout.addWidget(divider)
+        layout.addSpacing(16)
+
+        # 按钮组
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
         button_layout.addStretch()
-        
-        yes_btn = QPushButton("保存")
-        yes_btn.setFixedSize(88, 32)
-        yes_btn.setStyleSheet(f"""
+
+        save_btn = QPushButton("保存")
+        save_btn.setFixedSize(120, 32)
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #0078d4;
-                color: white;
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
+                background-color: {colors['accent']};
+                color: {"#000000" if is_dark else "#ffffff"};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 600;
+                border: none; border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: #005a9e;
-            }}
-            QPushButton:pressed {{
-                background-color: #004578;
-            }}
+            QPushButton:hover {{ background-color: {colors['accent_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['accent_pressed']}; }}
         """)
-        yes_btn.clicked.connect(dialog.accept)
-        button_layout.addWidget(yes_btn)
-        
-        no_btn = QPushButton("不保存")
-        no_btn.setFixedSize(88, 32)
-        no_btn.setStyleSheet(f"""
+        save_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(save_btn)
+
+        discard_btn = QPushButton("不保存")
+        discard_btn.setFixedSize(120, 32)
+        discard_btn.setCursor(Qt.PointingHandCursor)
+        discard_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {'#3c3c3c' if is_dark else '#e0e0e0'};
-                color: {text_color};
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 13px;
-                border: none;
+                background-color: {colors['subtle_bg']};
+                color: {colors['title']};
+                font-family: {font_family};
+                font-size: 13px; font-weight: 400;
+                border: 1px solid {colors['subtle_border']};
                 border-radius: 4px;
+                padding: 0 16px;
             }}
-            QPushButton:hover {{
-                background-color: {'#4a4a4a' if is_dark else '#d0d0d0'};
-            }}
+            QPushButton:hover {{ background-color: {colors['subtle_hover']}; }}
+            QPushButton:pressed {{ background-color: {colors['subtle_pressed']}; }}
         """)
-        no_btn.clicked.connect(dialog.reject)
-        button_layout.addWidget(no_btn)
-        
-        content_layout.addLayout(button_layout)
-        
-        layout.addWidget(title_bar)
-        layout.addWidget(content_area)
-        
+        discard_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(discard_btn)
+
+        layout.addLayout(button_layout)
+
         result = dialog.exec()
         return result == QDialog.Accepted
 
@@ -879,7 +1331,10 @@ class MarkdownWidget(QFrame):
                 f"是否保存对 {self.document.file_path or 'untitled.md'} 的更改？"
             )
             if ret:
-                self.save_file()
+                if self.document.file_path:
+                    self.save_file()
+                else:
+                    self.save_file_dialog()
         return True
 
     def _updatePreviewRoundMask(self):

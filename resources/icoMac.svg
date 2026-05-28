@@ -1,163 +1,80 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- ============== 背景 acrylic ============== -->
     <linearGradient id="bgBase" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1E88E5"/>
-      <stop offset="0.45" stop-color="#3F51B5"/>
-      <stop offset="1" stop-color="#7C3AED"/>
+      <stop offset="0" stop-color="#1976D2"/>
+      <stop offset="0.5" stop-color="#3949AB"/>
+      <stop offset="1" stop-color="#6A1B9A"/>
     </linearGradient>
     <radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
-      gradientTransform="translate(280 240) scale(720)">
-      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.55"/>
-      <stop offset="0.55" stop-color="#3B82F6" stop-opacity="0.10"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+      gradientTransform="translate(300 260) scale(700)">
+      <stop offset="0" stop-color="#64B5F6" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#42A5F5" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="bgVignette" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
-      gradientTransform="translate(800 880) scale(560)">
-      <stop offset="0" stop-color="#000000" stop-opacity="0.32"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
-    </radialGradient>
-
-    <filter id="bgNoise" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
-      <feTurbulence type="fractalNoise" baseFrequency="0.92" numOctaves="2" stitchTiles="stitch" seed="9"/>
-      <feColorMatrix values="
-        1 0 0 0 0
-        0 1 0 0 0
-        0 0 1 0 0
-        0 0 0 0.06 0"/>
+    <linearGradient id="docFace" x1="300" y1="200" x2="760" y2="840" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.94"/>
+      <stop offset="1" stop-color="#DCEAFF" stop-opacity="0.82"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="360" y1="400" x2="720" y2="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A237E"/>
+      <stop offset="1" stop-color="#4A148C"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="680" y1="420" x2="680" y2="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2979FF"/>
+      <stop offset="1" stop-color="#7C4DFF"/>
+    </linearGradient>
+    <filter id="ds" x="-8%" y="-4%" width="116%" height="116%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000" flood-opacity="0.40"/>
     </filter>
-
-    <!-- ============== 阴影 ============== -->
-    <filter id="docShadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="32" stdDeviation="34" flood-color="#02061A" flood-opacity="0.50"/>
-    </filter>
-    <filter id="inkShadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#020A20" flood-opacity="0.55"/>
-    </filter>
-    <filter id="inkGlow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-      <feGaussianBlur stdDeviation="6"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.9"/></feComponentTransfer>
-      <feComposite in2="SourceGraphic" operator="in"/>
-    </filter>
-
-    <!-- ============== 玻璃文档 ============== -->
-    <linearGradient id="glassFace" x1="280" y1="200" x2="780" y2="860" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.92"/>
-      <stop offset="0.55" stop-color="#F1F6FF" stop-opacity="0.82"/>
-      <stop offset="1" stop-color="#DCE7FF" stop-opacity="0.74"/>
-    </linearGradient>
-    <linearGradient id="glassEdge" x1="320" y1="820" x2="780" y2="940" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1E40AF" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#4338CA" stop-opacity="0.55"/>
-    </linearGradient>
-    <linearGradient id="strokeHi" x1="320" y1="200" x2="820" y2="860" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
-      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.20"/>
-    </linearGradient>
-    <radialGradient id="specHi" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
-      gradientTransform="translate(400 280) rotate(28) scale(480 340)">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.80"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="foldGrad" x1="690" y1="240" x2="820" y2="380" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.85"/>
-      <stop offset="1" stop-color="#BFD3FF" stop-opacity="0.55"/>
-    </linearGradient>
-
-    <!-- ============== 字标渐变 ============== -->
-    <linearGradient id="inkGrad" x1="370" y1="400" x2="780" y2="700" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1E3A8A"/>
-      <stop offset="0.55" stop-color="#3730A3"/>
-      <stop offset="1" stop-color="#6D28D9"/>
-    </linearGradient>
-    <linearGradient id="arrowGrad" x1="540" y1="520" x2="540" y2="700" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3B82F6"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
-    </linearGradient>
-
-    <!-- ============== squircle 蒙版 ============== -->
-    <clipPath id="squircleClip">
-      <path d="M512 0 C 740 0 880 0 952 72 C 1024 144 1024 284 1024 512 C 1024 740 1024 880 952 952 C 880 1024 740 1024 512 1024 C 284 1024 144 1024 72 952 C 0 880 0 740 0 512 C 0 284 0 144 72 72 C 144 0 284 0 512 0 Z"/>
-    </clipPath>
   </defs>
 
-  <!-- ============== 背景层（被 squircle 裁剪） ============== -->
-  <g clip-path="url(#squircleClip)">
-    <!-- 主底色 -->
-    <rect width="1024" height="1024" fill="url(#bgBase)"/>
-    <!-- 高光 -->
-    <rect width="1024" height="1024" fill="url(#bgGlow)"/>
-    <!-- 右下角暗角 -->
-    <rect width="1024" height="1024" fill="url(#bgVignette)"/>
-    <!-- acrylic 噪点 -->
-    <rect width="1024" height="1024" filter="url(#bgNoise)" opacity="0.85"/>
+  <!-- 圆角矩形背景（macOS 规范：80% 画布 + 22.5% 圆角） -->
+  <rect x="96" y="96" width="832" height="832" rx="210" ry="210" fill="url(#bgBase)"/>
+  <rect x="96" y="96" width="832" height="832" rx="210" ry="210" fill="url(#bgGlow)"/>
 
-    <!-- 装饰：右上角散落小点（"流畅书写" 的隐喻） -->
-    <g opacity="0.55" fill="#FFFFFF">
-      <circle cx="860" cy="160" r="4"/>
-      <circle cx="900" cy="220" r="6"/>
-      <circle cx="820" cy="220" r="3"/>
-      <circle cx="940" cy="280" r="3"/>
-      <circle cx="780" cy="120" r="2.5"/>
-    </g>
-    <!-- 装饰：左下角代码符号 </> -->
-    <g opacity="0.22" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="150,840 110,880 150,920"/>
-      <polyline points="240,840 280,880 240,920"/>
-      <line x1="210" y1="820" x2="180" y2="940"/>
-    </g>
-
-    <!-- ============== 玻璃文档 ============== -->
-    <g filter="url(#docShadow)">
-      <!-- 厚度（下右偏移，形成 3D） -->
-      <path d="M332 270C332 241.49 355.49 218 384 218H648C665.673 218 682.622 225.02 695.121 237.52L781.48 323.879C793.98 336.378 801 353.327 801 371V760C801 788.51 777.51 812 749 812H384C355.49 812 332 788.51 332 760V270Z"
-        fill="url(#glassEdge)"/>
-      <!-- 正面 -->
-      <path d="M308 246C308 217.49 331.49 194 360 194H624C641.673 194 658.622 201.02 671.121 213.52L757.48 299.879C769.98 312.378 777 329.327 777 347V736C777 764.51 753.51 788 725 788H360C331.49 788 308 764.51 308 736V246Z"
-        fill="url(#glassFace)"/>
-      <!-- 镜面高光 -->
-      <path d="M322 264C330 226 358 208 392 204H590C640 204 676 234 690 274C616 280 540 316 478 366C416 414 370 482 346 554C328 454 312 346 322 264Z"
-        fill="url(#specHi)" opacity="0.80"/>
-      <!-- 折角 -->
-      <path d="M624 194V302C624 330.51 647.49 354 676 354H777L624 194Z"
-        fill="url(#foldGrad)"/>
-      <!-- 折角内阴影线 -->
-      <path d="M624 194V302C624 330.51 647.49 354 676 354H777"
-        fill="none" stroke="#FFFFFF" stroke-width="3" stroke-opacity="0.7"/>
-      <!-- 文档内描边 -->
-      <path d="M360 199H624C640.347 199 656.026 205.494 667.586 217.054L753.946 303.414C765.506 314.974 772 330.653 772 347V736C772 761.747 750.747 783 725 783H360C334.253 783 313 761.747 313 736V246C313 220.253 334.253 199 360 199Z"
-        fill="none" stroke="url(#strokeHi)" stroke-width="8"/>
-    </g>
-
-    <!-- ============== "M ↓" 字标 ============== -->
-    <g filter="url(#inkShadow)">
-      <!-- M -->
-      <path d="M362 610V438C362 425.85 371.85 416 384 416H402C409.26 416 416.05 419.59 420.13 425.59L482 516.5L543.87 425.59C547.95 419.59 554.74 416 562 416H580C592.15 416 602 425.85 602 438V610C602 622.15 592.15 632 580 632H570C557.85 632 548 622.15 548 610V498L500 568.5C496.32 573.91 490.21 577.15 483.7 577.15C477.19 577.15 471.08 573.91 467.4 568.5L416 494V610C416 622.15 406.15 632 394 632H384C371.85 632 362 622.15 362 610Z"
-        fill="url(#inkGrad)"/>
-
-      <!-- 箭头 ↓（指向下，象征 Markdown "渲染" 流） -->
-      <g fill="url(#arrowGrad)">
-        <!-- 箭头杆 -->
-        <rect x="688" y="416" width="36" height="142" rx="18"/>
-        <!-- 箭头头（菱形/三角合体） -->
-        <path d="M706 640L640 558C634.5 551.2 639.3 541 648 541H764C772.7 541 777.5 551.2 772 558L706 640Z"/>
-      </g>
-    </g>
-
-    <!-- ============== 文档底部一行示意"文本"（增加细节感） ============== -->
-    <g opacity="0.45">
-      <rect x="362" y="680" width="320" height="14" rx="7" fill="#1E3A8A"/>
-      <rect x="362" y="710" width="240" height="14" rx="7" fill="#1E3A8A"/>
-      <rect x="362" y="740" width="180" height="14" rx="7" fill="#1E3A8A"/>
-    </g>
-
-    <!-- squircle 顶部薄高光（玻璃感） -->
-    <path d="M72 60 Q 200 30 512 30 Q 824 30 952 60 L 952 80 Q 824 50 512 50 Q 200 50 72 80 Z"
-      fill="#FFFFFF" opacity="0.18"/>
+  <!-- 装饰点 -->
+  <g opacity="0.45" fill="#FFF">
+    <circle cx="860" cy="160" r="5"/>
+    <circle cx="900" cy="230" r="7"/>
+    <circle cx="815" cy="215" r="3.5"/>
+    <circle cx="940" cy="290" r="4"/>
   </g>
 
-  <!-- squircle 边缘内描边（让边轮廓更精致） -->
-  <path d="M512 6 C 738 6 876 6 947 77 C 1018 148 1018 286 1018 512 C 1018 738 1018 876 947 947 C 876 1018 738 1018 512 1018 C 286 1018 148 1018 77 947 C 6 876 6 738 6 512 C 6 286 6 148 77 77 C 148 6 286 6 512 6 Z"
-    fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="2"/>
+  <!-- 左下角 </> 符号 -->
+  <g opacity="0.18" fill="none" stroke="#FFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="150,840 105,885 150,930"/>
+    <polyline points="245,840 290,885 245,930"/>
+    <line x1="215" y1="818" x2="180" y2="950"/>
+  </g>
+
+  <!-- 玻璃文档 -->
+  <g filter="url(#ds)">
+    <path d="M300 250C300 222 320 202 348 202H600C618 202 634 209 646 221L748 323C760 335 768 352 768 370V740C768 768 748 788 720 788H348C320 788 300 768 300 740V250Z"
+      fill="url(#docFace)"/>
+    <path d="M600 202V310C600 336 620 356 646 356H748L600 202Z"
+      fill="#FFFFFF" fill-opacity="0.65"/>
+    <path d="M348 208H600C616 208 632 214 643 225L745 327C756 338 762 354 762 370V740C762 764 742 784 720 784H348C326 784 306 764 306 740V250C306 226 326 208 348 208Z"
+      fill="none" stroke="#FFFFFF" stroke-width="7" stroke-opacity="0.55"/>
+  </g>
+
+  <!-- M 字母 -->
+  <path d="M350 640V430C350 418 360 408 372 408H396C406 408 414 413 420 421L492 530L564 421C570 413 578 408 588 408H612C624 408 634 418 634 430V640C634 652 624 662 612 662H600C588 662 578 652 578 640V510L524 598C519 605 512 610 504 610C496 610 489 605 484 598L426 506V640C426 652 416 662 404 662H392C380 662 370 652 370 640Z"
+    fill="url(#ink)"/>
+
+  <!-- 箭头 ↓ -->
+  <g fill="url(#arrow)">
+    <rect x="680" y="408" width="44" height="156" rx="22"/>
+    <path d="M702 664L622 570C616 562 621 550 632 550H772C783 550 788 562 782 570L702 664Z"/>
+  </g>
+
+  <!-- 底部文本行 -->
+  <g opacity="0.38">
+    <rect x="354" y="700" width="300" height="15" rx="7.5" fill="#1A237E"/>
+    <rect x="354" y="732" width="225" height="15" rx="7.5" fill="#1A237E"/>
+    <rect x="354" y="764" width="155" height="15" rx="7.5" fill="#1A237E"/>
+  </g>
+
+  <!-- 圆角矩形边框高光 -->
+  <rect x="98" y="98" width="828" height="828" rx="208" ry="208"
+    fill="none" stroke="#FFF" stroke-opacity="0.15" stroke-width="3"/>
 </svg>

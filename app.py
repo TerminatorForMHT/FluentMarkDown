@@ -50,10 +50,11 @@ class MainWindow(FluentWidget):
     
     def _setup_icon(self):
         try:
+            icon_name = "icon.icns" if sys.platform == "darwin" else "mark.ico"
             if getattr(sys, 'frozen', False):
-                icon_path = os.path.join(sys._MEIPASS, "resources", "mark.ico")
+                icon_path = os.path.join(sys._MEIPASS, "resources", icon_name)
             else:
-                icon_path = os.path.join(os.path.dirname(__file__), "resources", "mark.ico")
+                icon_path = os.path.join(os.path.dirname(__file__), "resources", icon_name)
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception:
@@ -101,10 +102,11 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     try:
+        icon_name = "icon.icns" if sys.platform == "darwin" else "mark.ico"
         if getattr(sys, 'frozen', False):
-            icon_path = os.path.join(sys._MEIPASS, "resources", "mark.ico")
+            icon_path = os.path.join(sys._MEIPASS, "resources", icon_name)
         else:
-            icon_path = os.path.join(os.path.dirname(__file__), "resources", "mark.ico")
+            icon_path = os.path.join(os.path.dirname(__file__), "resources", icon_name)
         if os.path.exists(icon_path):
             app.setWindowIcon(QIcon(icon_path))
     except Exception:
