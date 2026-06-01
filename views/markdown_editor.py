@@ -78,9 +78,9 @@ class MarkdownWidget(QFrame):
         self._add_icon_button('save', FluentIcon.SAVE, "保存 Ctrl+S", self.save_file_dialog)
 
         self._history_menu = RoundMenu(parent=self)
-        recent_button = DropDownPushButton(FluentIcon.HISTORY, "最近", self)
-        recent_button.setMenu(self._history_menu)
-        self.command_bar.addWidget(recent_button)
+        self._recent_button = DropDownPushButton(FluentIcon.HISTORY, "最近", self)
+        self._recent_button.setMenu(self._history_menu)
+        self.command_bar.addWidget(self._recent_button)
 
         self.command_bar.addSeparator()
 
@@ -99,6 +99,8 @@ class MarkdownWidget(QFrame):
         format_menu.addAction(Action(FluentIcon.FONT_SIZE, "标题", triggered=self._insert_heading))
         format_menu.addAction(Action(FluentIcon.MENU, "列表", triggered=self._insert_list_item))
         format_menu.addAction(Action(FluentIcon.CHAT, "引用", triggered=self._insert_quote))
+        format_menu.addSeparator()
+        format_menu.addAction(Action(FluentIcon.CALORIES, "插入表格", triggered=self._insert_table))
 
         format_button = DropDownPushButton(FluentIcon.EDIT, "格式", self)
         format_button.setMenu(format_menu)
@@ -657,6 +659,126 @@ class MarkdownWidget(QFrame):
             cursor.setPosition(pos + 4)
             self.editor.setTextCursor(cursor)
 
+    def _insert_table(self):
+        """Fluent Design 风格的表格插入弹窗"""
+        if not self.document.has_file:
+            return
+
+        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QSpinBox
+
+        dialog, card, is_dark = self._create_fluent_dialog(300, 200)
+        colors = self._fluent_colors(is_dark)
+        text_color = colors["title"]
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
+
+        # 标题
+        title = QLabel("插入表格")
+        title.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {text_color}; background: transparent; border: none;")
+        layout.addWidget(title)
+
+        # SpinBox 样式
+        spin_style = f"""
+            QSpinBox {{
+                background: {colors["subtle_bg"]};
+                border: 1px solid {colors["subtle_border"]};
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: {text_color};
+                font-size: 14px;
+                min-width: 80px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 20px;
+                border: none;
+                background: {colors["subtle_hover"]};
+            }}
+        """
+        label_style = f"color: {colors['body']}; font-size: 14px; background: transparent; border: none;"
+
+        # 行数
+        row_layout = QHBoxLayout()
+        row_label = QLabel("行数")
+        row_label.setStyleSheet(label_style)
+        row_label.setFixedWidth(40)
+        row_spin = QSpinBox()
+        row_spin.setRange(1, 50)
+        row_spin.setValue(3)
+        row_spin.setStyleSheet(spin_style)
+        row_layout.addWidget(row_label)
+        row_layout.addWidget(row_spin, 1)
+        layout.addLayout(row_layout)
+
+        # 列数
+        col_layout = QHBoxLayout()
+        col_label = QLabel("列数")
+        col_label.setStyleSheet(label_style)
+        col_label.setFixedWidth(40)
+        col_spin = QSpinBox()
+        col_spin.setRange(1, 20)
+        col_spin.setValue(3)
+        col_spin.setStyleSheet(spin_style)
+        col_layout.addWidget(col_label)
+        col_layout.addWidget(col_spin, 1)
+        layout.addLayout(col_layout)
+
+        layout.addStretch()
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        from PyQt5.QtWidgets import QPushButton
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedSize(80, 32)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {colors["subtle_bg"]};
+                border: 1px solid {colors["subtle_border"]};
+                border-radius: 4px;
+                color: {text_color};
+                font-size: 14px;
+            }}
+            QPushButton:hover {{ background: {colors["subtle_hover"]}; }}
+        """)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        ok_btn = QPushButton("插入")
+        ok_btn.setFixedSize(80, 32)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {colors["accent"]};
+                border: none;
+                border-radius: 4px;
+                color: white;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{ background: {colors["accent_hover"]}; }}
+            QPushButton:pressed {{ background: {colors["accent_pressed"]}; }}
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+        from PyQt5.QtWidgets import QDialog
+        if dialog.exec_() == QDialog.Accepted:
+            rows = row_spin.value()
+            cols = col_spin.value()
+            header = "| " + " | ".join([f"标题{i+1}" for i in range(cols)]) + " |"
+            separator = "| " + " | ".join(["---"] * cols) + " |"
+            body_lines = []
+            for _ in range(rows):
+                body_lines.append("| " + " | ".join(["  "] * cols) + " |")
+            table_text = "\n".join([header, separator] + body_lines) + "\n"
+            cursor = self.editor.textCursor()
+            cursor.insertText(table_text)
+            self.editor.setTextCursor(cursor)
+
     def _insert_strikethrough(self):
         if not self.document.has_file:
             return
@@ -837,6 +959,10 @@ class MarkdownWidget(QFrame):
         self.editor.selectionChanged.connect(self.update_status_bar)
         self.editor.verticalScrollBar().valueChanged.connect(self._sync_preview_scroll)
 
+        # 拖拽信号
+        self.editor.image_dropped.connect(self._on_images_dropped)
+        self.editor.md_file_dropped.connect(self._on_md_file_dropped)
+
         self._setup_shortcuts()
         self._update_command_bar_enabled()
         self._update_history_menu()
@@ -959,7 +1085,12 @@ class MarkdownWidget(QFrame):
             self.theme_label_cmd.setEnabled(enabled)
 
     def _update_history_menu(self):
-        self._history_menu.clear()
+        # RoundMenu.clear() 不能完全清空，需要销毁重建
+        old_menu = self._history_menu
+        self._history_menu = RoundMenu(parent=self)
+        self._recent_button.setMenu(self._history_menu)
+        old_menu.deleteLater()
+
         recent_files = self.document.get_recent_files()
         if not recent_files:
             action = Action("无历史文件", self._history_menu)
@@ -1236,6 +1367,24 @@ class MarkdownWidget(QFrame):
                     return
         self.editor.paste()
 
+    def _on_images_dropped(self, image_paths):
+        """拖拽图片到编辑器时插入 Markdown 图片标记"""
+        if not self.document.has_file:
+            return
+        cursor = self.editor.textCursor()
+        lines = []
+        for path in image_paths:
+            name = os.path.basename(path)
+            url = self._local_path_to_url(path)
+            lines.append(f"![{name}]({url})")
+        cursor.insertText("\n".join(lines))
+        self.controller.set_content(self.editor.toPlainText())
+        self.update_preview()
+
+    def _on_md_file_dropped(self, file_path):
+        """拖拽 .md 文件到编辑器时打开该文件"""
+        self.open_file(file_path)
+
     def insert_image(self):
         if not self.document.has_file:
             return
@@ -1270,7 +1419,6 @@ class MarkdownWidget(QFrame):
         if not self.document.has_file:
             return
         if not self.is_fullscreen:
-            # 先恢复所有控件可见性，再进入全屏阅读
             self.preview_container.show()
             self.editor.hide()
             self.splitter.setSizes([0, self.splitter.width()])
@@ -1278,7 +1426,15 @@ class MarkdownWidget(QFrame):
             self.card_container_layout.setContentsMargins(0, 0, 0, 0)
             self.is_fullscreen = True
             self.is_editor_fullscreen = False
+            # 显示大纲切换按钮
+            self.preview.page().runJavaScript(
+                'document.getElementById("outlineToggle").classList.add("visible"); buildOutline();'
+            )
         else:
+            # 隐藏大纲
+            self.preview.page().runJavaScript(
+                'hideOutline(); document.getElementById("outlineToggle").classList.remove("visible");'
+            )
             self._restore_split_view()
         self._updatePreviewRoundMask()
 
