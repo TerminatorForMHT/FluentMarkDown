@@ -1,7 +1,7 @@
 """带行号和当前行高亮的代码编辑器，基于 QPlainTextEdit"""
 
 from PyQt5.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
-from PyQt5.QtCore import Qt, QRect, QSize, QEvent
+from PyQt5.QtCore import Qt, QRect, QSize, QEvent, QUrl, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QTextFormat, QFont, QKeyEvent, QTextCursor
 
 
@@ -22,11 +22,28 @@ class LineNumberArea(QWidget):
 class LineNumberEditor(QPlainTextEdit):
     """带行号显示和当前行高亮的 Markdown 编辑器"""
 
+    # 拖拽信号：图片文件路径列表 / md文件路径
+    image_dropped = pyqtSignal(list)
+    md_file_dropped = pyqtSignal(str)
+
+    # 括号配对表
+    BRACKET_PAIRS = {
+        '(': ')',
+        '[': ']',
+        '{': '}',
+        '"': '"',
+        "'": "'",
+        '`': '`',
+    }
+
+    IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp')
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._line_number_area = LineNumberArea(self)
         self._is_dark = False
         self._show_line_numbers = True
+        self.setAcceptDrops(True)
 
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -136,8 +153,44 @@ class LineNumberEditor(QPlainTextEdit):
 
         painter.end()
 
+    def dragEnterEvent(self, event):
+        """接受图片和 .md 文件拖入"""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                path = url.toLocalFile().lower()
+                if path.endswith(self.IMAGE_EXTENSIONS) or path.endswith('.md'):
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        """处理拖拽放下：图片插入标记，md 文件发信号打开"""
+        if event.mimeData().hasUrls():
+            image_paths = []
+            for url in event.mimeData().urls():
+                path = url.toLocalFile()
+                if path.lower().endswith('.md'):
+                    self.md_file_dropped.emit(path)
+                    event.acceptProposedAction()
+                    return
+                if path.lower().endswith(self.IMAGE_EXTENSIONS):
+                    image_paths.append(path)
+            if image_paths:
+                self.image_dropped.emit(image_paths)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent):
-        """处理自动缩进和智能输入"""
+        """处理自动缩进、括号补全和智能输入"""
+        key_text = event.text()
+
         if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
             self._handle_auto_indent()
             return
@@ -153,6 +206,61 @@ class LineNumberEditor(QPlainTextEdit):
         if event.key() == Qt.Key_Backtab:
             self._indent_selection(increase=False)
             return
+
+        # 括号/引号自动补全
+        if key_text in self.BRACKET_PAIRS:
+            cursor = self.textCursor()
+            closing = self.BRACKET_PAIRS[key_text]
+            if cursor.hasSelection():
+                # 用配对符号包裹选中文本
+                selected = cursor.selectedText()
+                cursor.insertText(f"{key_text}{selected}{closing}")
+                # 光标放在闭合符号前
+                cursor.movePosition(QTextCursor.Left)
+                self.setTextCursor(cursor)
+            else:
+                cursor.insertText(key_text + closing)
+                cursor.movePosition(QTextCursor.Left)
+                self.setTextCursor(cursor)
+            return
+
+        # 输入闭合符号时如果下一个字符就是它，跳过而非重复插入
+        if key_text and key_text in self.BRACKET_PAIRS.values():
+            cursor = self.textCursor()
+            doc = self.document()
+            pos = cursor.position()
+            if pos < doc.characterCount():
+                next_char_cursor = QTextCursor(doc)
+                next_char_cursor.setPosition(pos)
+                next_char_cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+                if next_char_cursor.selectedText() == key_text:
+                    cursor.movePosition(QTextCursor.Right)
+                    self.setTextCursor(cursor)
+                    return
+
+        # Backspace 删除空括号对
+        if event.key() == Qt.Key_Backspace:
+            cursor = self.textCursor()
+            if not cursor.hasSelection() and cursor.position() > 0:
+                pos = cursor.position()
+                doc = self.document()
+                # 获取前一个字符
+                prev_cursor = QTextCursor(doc)
+                prev_cursor.setPosition(pos - 1)
+                prev_cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+                prev_char = prev_cursor.selectedText()
+                # 获取后一个字符
+                if pos < doc.characterCount() and prev_char in self.BRACKET_PAIRS:
+                    next_cursor = QTextCursor(doc)
+                    next_cursor.setPosition(pos)
+                    next_cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+                    next_char = next_cursor.selectedText()
+                    if next_char == self.BRACKET_PAIRS[prev_char]:
+                        # 同时删除配对的两个符号
+                        cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor)
+                        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 2)
+                        cursor.removeSelectedText()
+                        return
 
         super().keyPressEvent(event)
 
