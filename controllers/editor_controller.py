@@ -60,13 +60,77 @@ class EditorController:
         html = re.sub(r'<img\s+src="([^"]+)"', replace_path, html)
         return html
 
+    def render_body_html(self):
+        """将 markdown 内容渲染为 HTML body 片段（含公式保护、任务列表、图片路径转换）"""
+        content = self.document.content
+        content, math_placeholders = self._protect_math(content)
+        html = markdown.markdown(content, extensions=['fenced_code', 'extra', 'tables'])
+        html = self._restore_math(html, math_placeholders)
+        html = self._render_task_list(html)
+        html = self._convert_image_paths(html)
+        return html
+
     def render_preview(self, is_dark=False):
         ts = self._get_theme_styles(is_dark)
-        # 添加更多扩展支持图片和其他格式
-        html = markdown.markdown(self.document.content, extensions=['fenced_code', 'extra', 'tables'])
-        # 转换图片路径为 file:// 协议
-        html = self._convert_image_paths(html)
+        html = self.render_body_html()
         return self._build_html(html, ts, is_dark)
+
+    def _render_task_list(self, html):
+        """将 markdown 生成的 [ ] / [x] 列表项转为可交互的 checkbox"""
+        task_index = [0]
+
+        def _replace_task(match):
+            prefix = match.group(1)
+            checked = match.group(2).lower() == 'x'
+            text_after = match.group(3)
+            idx = task_index[0]
+            task_index[0] += 1
+            checked_attr = ' checked' if checked else ''
+            return (
+                f'{prefix}<input type="checkbox" class="task-checkbox" '
+                f'data-task-index="{idx}"{checked_attr}>{text_after}'
+            )
+
+        # 匹配 <li> 开头的 [ ] 或 [x]
+        html = re.sub(
+            r'(<li[^>]*>)\s*\[([ xX])\]\s*(.*?)',
+            _replace_task,
+            html
+        )
+        return html
+
+    def _protect_math(self, text):
+        """将 $$...$$ 和 $...$ 替换为占位符，防止 markdown 破坏公式内容"""
+        placeholders = {}
+        counter = [0]
+
+        def _replace(match):
+            key = f"MATHPLACEHOLDER{counter[0]}END"
+            counter[0] += 1
+            raw = match.group(0)
+            if raw.startswith('$$'):
+                inner = match.group(1)
+                placeholders[key] = f'<div class="math-block">{self._escape_html(inner)}</div>'
+            else:
+                inner = match.group(1)
+                placeholders[key] = f'<span class="math-inline">{self._escape_html(inner)}</span>'
+            return key
+
+        # 先处理 $$...$$ （块级，可跨行）
+        text = re.sub(r'\$\$([\s\S]+?)\$\$', _replace, text)
+        # 再处理 $...$ （行内，不跨行）
+        text = re.sub(r'(?<!\$)\$([^\$\n]+?)\$(?!\$)', _replace, text)
+        return text, placeholders
+
+    @staticmethod
+    def _escape_html(text):
+        return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    @staticmethod
+    def _restore_math(html, placeholders):
+        for key, value in placeholders.items():
+            html = html.replace(key, value)
+        return html
 
     def _get_theme_styles(self, is_dark):
         from models.themes import PreviewThemes
