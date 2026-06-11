@@ -45,6 +45,8 @@ class MarkdownWidget(QFrame):
         self._preview_updating = False
         self._preview_dirty = False
         self._last_md5 = None
+        self._last_preview_page_signature = None
+        self._keep_preview_scroll_once = True
         self._command_bar_buttons = {}
         self._auto_save_timer = QTimer(self)
         self._auto_save_timer.timeout.connect(self._auto_save)
@@ -123,6 +125,7 @@ class MarkdownWidget(QFrame):
 
         # ── 导出 ──
         self._add_icon_button('export', FluentIcon.SHARE, "导出", self.export_file)
+        self._add_icon_button('copy_rich', FluentIcon.COPY, "复制为富文本", self.copy_as_rich_text)
 
         self.vBoxLayout.addWidget(self.command_bar)
 
@@ -308,7 +311,7 @@ class MarkdownWidget(QFrame):
         accent = "#0078d4"
         accent_bg = "rgba(0,120,212,0.15)" if is_dark else "rgba(0,120,212,0.12)"
         count_color = "rgba(255,255,255,0.45)" if is_dark else "rgba(0,0,0,0.4)"
-        font = "'Segoe UI Variable','Segoe UI',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif"
+        font = "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
 
         self.find_replace_bar.setStyleSheet(f"""
             QFrame#findReplaceBar {{
@@ -859,6 +862,18 @@ class MarkdownWidget(QFrame):
 
         class ExternalLinkPage(QWebEnginePage):
             def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+                url_str = url.toString()
+                # 任务列表 checkbox 交互
+                if url_str.startswith("task-toggle://"):
+                    parts = url_str.replace("task-toggle://", "").split("/")
+                    if len(parts) >= 2:
+                        try:
+                            task_index = int(parts[0])
+                            checked = parts[1] == "1"
+                            widget_ref._on_task_toggled(task_index, checked)
+                        except (ValueError, IndexError):
+                            pass
+                    return False
                 if nav_type == QWebEnginePage.NavigationTypeLinkClicked:
                     path = url.toLocalFile()
                     if path and path.lower().endswith('.md'):
@@ -944,6 +959,7 @@ class MarkdownWidget(QFrame):
         QShortcut(QKeySequence("Ctrl+I"), self, self._toggle_italic)
         QShortcut(QKeySequence("Ctrl+K"), self, self._insert_link)
         QShortcut(QKeySequence("Ctrl+Shift+K"), self, self._insert_code)
+        QShortcut(QKeySequence("Ctrl+P"), self, self.print_preview)
 
     def _shortcut_save(self):
         """Ctrl+S：有路径直接保存，无路径弹出另存为"""
@@ -1003,7 +1019,7 @@ class MarkdownWidget(QFrame):
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
             background: transparent;
             color: {body_color};
         }}
@@ -1112,12 +1128,40 @@ class MarkdownWidget(QFrame):
         self.document.clear_recent_files()
         self._update_history_menu()
 
+    def _update_window_title(self):
+        """更新主窗口标题为 'Fluent Markdown - filename.md *'"""
+        title = "Fluent Markdown"
+        if self.document.has_file and self.document.file_path:
+            file_name = os.path.basename(self.document.file_path)
+            title = f"Fluent Markdown - {file_name}"
+        elif self.document.has_file:
+            title = "Fluent Markdown - 未命名"
+        if self.document.is_modified:
+            title += " *"
+        window = self.window()
+        if window:
+            window.setWindowTitle(title)
+
+    def print_preview(self):
+        """Ctrl+P 调用系统打印对话框"""
+        if hasattr(self, 'preview') and self.preview:
+            self.preview.page().runJavaScript(
+                'document.title = "Fluent Markdown"',
+                lambda _: self.preview.page().printToPdf(self._on_print_pdf_ready) if hasattr(self.preview.page(), 'printToPdf') else None
+            )
+            from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
+            printer = QPrinter(QPrinter.HighResolution)
+            dialog = QPrintDialog(printer, self)
+            if dialog.exec_() == QPrintDialog.Accepted:
+                self.preview.page().print(printer, lambda ok: None)
+
     def _on_text_changed(self):
         if not self.document.has_file:
             return
         self.document.is_modified = True
         content = self.editor.toPlainText()
         self.controller.set_content(content)
+        self._update_window_title()
         self.update_status_bar()
 
         if self._preview_updating:
@@ -1140,84 +1184,59 @@ class MarkdownWidget(QFrame):
 
     def update_preview(self):
         content = self.controller.get_content()
-        content_bytes = content.encode('utf-8')
-        current_md5 = QCryptographicHash.hash(content_bytes, QCryptographicHash.Md5).toHex().data().decode()
+        is_dark = isDarkTheme()
+
+        from PyQt5.QtCore import QUrl
+        if self.document.file_path:
+            base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
+        else:
+            base_url = QUrl.fromLocalFile(os.getcwd() + '/')
+
+        page_signature = "\n".join([
+            self.controller.preview_theme,
+            str(self.controller.font_size),
+            "dark" if is_dark else "light",
+        ])
+        signature_source = "\n".join([
+            content,
+            base_url.toString(),
+            page_signature,
+        ])
+        current_md5 = QCryptographicHash.hash(
+            signature_source.encode('utf-8'),
+            QCryptographicHash.Md5
+        ).toHex().data().decode()
 
         if current_md5 == self._last_md5:
             return
 
         self._preview_updating = True
-        is_dark = isDarkTheme()
 
-        # 增量更新：如果页面已加载且只是内容变化，用 JS 替换 DOM 而非重载整个页面
-        if self._last_md5 is not None and hasattr(self, '_preview_loaded') and self._preview_loaded:
-            import markdown
-            html_body = markdown.markdown(content, extensions=['fenced_code', 'extra', 'tables'])
-            html_body = self.controller._convert_image_paths(html_body)
-            # 转义 JS 字符串中的特殊字符
-            escaped = html_body.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
-            js = f'''
-                (function() {{
-                    var el = document.querySelector(".scroll");
-                    if (el) {{
-                        var scrollRatio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
-                        el.innerHTML = `{escaped}`;
-                        document.querySelectorAll("pre code").forEach(function(block) {{
-                            if (!block.classList.contains("language-mermaid")) {{
-                                try {{ hljs.highlightElement(block); }} catch(e) {{}}
-                            }}
-                        }});
-                        var mermaidBlocks = document.querySelectorAll("pre code.language-mermaid");
-                        if (mermaidBlocks.length > 0) {{
-                            try {{
-                                mermaidBlocks.forEach(function(block, idx) {{
-                                    var pre = block.parentElement;
-                                    var container = document.createElement("div");
-                                    container.className = "mermaid";
-                                    container.id = "mermaid-" + idx;
-                                    container.textContent = block.textContent;
-                                    pre.replaceWith(container);
-                                }});
-                                mermaid.run();
-                            }} catch(e) {{}}
-                        }}
-                        document.querySelectorAll("pre").forEach(function(pre) {{
-                            if (pre.querySelector(".copy-button")) return;
-                            var btn = document.createElement("button");
-                            btn.className = "copy-button";
-                            btn.textContent = "复制";
-                            pre.appendChild(btn);
-                            btn.addEventListener("click", function() {{
-                                var code = pre.querySelector("code");
-                                if (!code) return;
-                                var ta = document.createElement("textarea");
-                                ta.value = code.textContent;
-                                ta.style.cssText = "position:fixed;left:-9999px";
-                                document.body.appendChild(ta);
-                                ta.select();
-                                try {{ document.execCommand("copy"); btn.textContent = "已复制"; btn.classList.add("copied"); }} catch(e) {{ btn.textContent = "失败"; }}
-                                document.body.removeChild(ta);
-                                setTimeout(function() {{ btn.textContent = "复制"; btn.classList.remove("copied"); }}, 2000);
-                            }});
-                        }});
-                        var maxScroll = el.scrollHeight - el.clientHeight;
-                        el.scrollTop = maxScroll * scrollRatio;
-                    }}
-                }})();
-            '''
+        page_can_update_incrementally = (
+            self._last_md5 is not None
+            and hasattr(self, '_preview_loaded')
+            and self._preview_loaded
+            and self._last_preview_page_signature == page_signature
+        )
+
+        if page_can_update_incrementally:
+            html_body = self.controller.render_body_html()
+            import json
+            keep_scroll = self._keep_preview_scroll_once
+            js = (
+                f'updatePreviewBase({json.dumps(base_url.toString())});'
+                f'replaceMarkdownBody({json.dumps(html_body)}, {str(keep_scroll).lower()});'
+            )
             self.preview.page().runJavaScript(js)
         else:
             html = self.controller.render_preview(is_dark=is_dark)
-            from PyQt5.QtCore import QUrl
-            if self.document.file_path:
-                base_url = QUrl.fromLocalFile(os.path.dirname(self.document.file_path) + '/')
-            else:
-                base_url = QUrl.fromLocalFile(os.getcwd() + '/')
             self.preview.setHtml(html, base_url)
             self._preview_loaded = True
 
         self.controller._cached_html_template = None
         self._last_md5 = current_md5
+        self._last_preview_page_signature = page_signature
+        self._keep_preview_scroll_once = True
         self._preview_updating = False
 
         if self._preview_dirty:
@@ -1317,7 +1336,9 @@ class MarkdownWidget(QFrame):
         self.document.is_modified = False
         self._hide_welcome_page()
         self._update_command_bar_enabled()
+        self._update_window_title()
         self._start_auto_save_timer()
+        self._keep_preview_scroll_once = False
         QTimer.singleShot(0, self._do_preview_update)
 
     def open_file_dialog(self):
@@ -1336,7 +1357,10 @@ class MarkdownWidget(QFrame):
             self._hide_welcome_page()
             self._update_command_bar_enabled()
             self._update_history_menu()
+            self._update_window_title()
             self._start_auto_save_timer()
+            self._keep_preview_scroll_once = False
+            # 切换文件时不重置 _last_md5，让增量更新路径生效
             QTimer.singleShot(0, self._do_preview_update)
 
     def save_file_dialog(self):
@@ -1346,6 +1370,7 @@ class MarkdownWidget(QFrame):
     def save_file(self, file_path=None):
         if self.document.save(file_path):
             self.document.is_modified = False
+            self._update_window_title()
             self._start_auto_save_timer()
 
     def copy(self):
@@ -1366,6 +1391,51 @@ class MarkdownWidget(QFrame):
                     self.update_preview()
                     return
         self.editor.paste()
+
+    def copy_as_rich_text(self):
+        """将预览内容复制为富文本到剪贴板，可直接粘贴到飞书/钉钉/邮件"""
+        if not self.document.has_file:
+            return
+        # 通过 JS 获取预览区的 innerHTML
+        self.preview.page().runJavaScript(
+            'document.querySelector(".scroll") ? document.querySelector(".scroll").innerHTML : ""',
+            self._on_rich_text_ready
+        )
+
+    def _on_rich_text_ready(self, html_content):
+        if not html_content:
+            return
+        from PyQt5.QtCore import QMimeData
+        mime_data = QMimeData()
+        mime_data.setHtml(html_content)
+        # 同时设置纯文本作为 fallback
+        mime_data.setText(self.controller.get_content())
+        QApplication.clipboard().setMimeData(mime_data)
+        self._show_info_dialog("复制成功", "预览内容已复制为富文本，可直接粘贴到飞书、钉钉、邮件等应用。")
+
+    def _on_task_toggled(self, task_index, checked):
+        """预览中 checkbox 被点击时，同步修改编辑器中对应的 - [ ] / - [x]"""
+        import re
+        text = self.editor.toPlainText()
+        pattern = re.compile(r'^(\s*[-*+]\s*)\[([ xX])\]', re.MULTILINE)
+        count = 0
+        for match in pattern.finditer(text):
+            if count == task_index:
+                old_mark = match.group(2)
+                new_mark = "x" if checked else " "
+                start = match.start(2)
+                end = match.end(2)
+                new_text = text[:start] + new_mark + text[end:]
+                cursor_pos = self.editor.textCursor().position()
+                self.editor.blockSignals(True)
+                self.editor.setPlainText(new_text)
+                cursor = self.editor.textCursor()
+                cursor.setPosition(min(cursor_pos, len(new_text)))
+                self.editor.setTextCursor(cursor)
+                self.editor.blockSignals(False)
+                self.controller.set_content(new_text)
+                return
+            count += 1
 
     def _on_images_dropped(self, image_paths):
         """拖拽图片到编辑器时插入 Markdown 图片标记"""
@@ -1511,7 +1581,8 @@ class MarkdownWidget(QFrame):
         elif ext == '.docx':
             success, message = ExportController.export_word(file_path, content)
         elif ext == '.html':
-            success, message = ExportController.export_html(file_path, content)
+            rendered_html = self.controller.render_preview(is_dark=False)
+            success, message = ExportController.export_html(file_path, rendered_html)
 
         self._show_info_dialog("导出成功" if success else "导出失败", message)
 
@@ -1639,7 +1710,7 @@ class MarkdownWidget(QFrame):
 
         dialog, card, is_dark = self._create_fluent_dialog(420, 200)
         colors = self._fluent_colors(is_dark)
-        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+        font_family = "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -1698,7 +1769,7 @@ class MarkdownWidget(QFrame):
 
         dialog, card, is_dark = self._create_fluent_dialog(460, 210)
         colors = self._fluent_colors(is_dark)
-        font_family = "'Segoe UI Variable', 'Segoe UI', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+        font_family = "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 20, 24, 20)
