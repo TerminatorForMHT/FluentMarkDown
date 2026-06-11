@@ -18,6 +18,7 @@ class PreviewHtmlBuilder:
 
     HIGHLIGHT_CDN = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0"
     MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
+    KATEX_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
 
     def __init__(self, theme_styles, font_size=16, is_dark=False, border_radius=8):
         self.ts = theme_styles
@@ -51,6 +52,7 @@ class PreviewHtmlBuilder:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="{self.HIGHLIGHT_CDN}/styles/{hljs_theme}.min.css">
+<link rel="stylesheet" href="{self.KATEX_CDN}/katex.min.css">
 <script>
   if (typeof structuredClone === "undefined") {{
     window.structuredClone = function(obj) {{ return JSON.parse(JSON.stringify(obj)); }};
@@ -58,6 +60,7 @@ class PreviewHtmlBuilder:
 </script>
 <script defer src="{self.HIGHLIGHT_CDN}/highlight.min.js"></script>
 <script defer src="{self.MERMAID_CDN}"></script>
+<script defer src="{self.KATEX_CDN}/katex.min.js"></script>
 <style>
 {self._css_base()}
 {self._css_typography()}
@@ -87,15 +90,22 @@ class PreviewHtmlBuilder:
         return f"""
 <script>
   document.addEventListener("DOMContentLoaded", function() {{
-    // highlight.js
-    document.querySelectorAll("pre code").forEach(function(block) {{
+    decoratePreviewContent(document);
+  }});
+
+  function decoratePreviewContent(root) {{
+    root = root || document;
+
+    root.querySelectorAll("pre code").forEach(function(block) {{
       if (!block.classList.contains("language-mermaid")) {{
-        try {{ hljs.highlightElement(block); }} catch(e) {{}}
+        try {{
+          block.textContent = block.textContent;
+          hljs.highlightElement(block);
+        }} catch(e) {{}}
       }}
     }});
 
-    // Mermaid
-    var mermaidBlocks = document.querySelectorAll("pre code.language-mermaid");
+    var mermaidBlocks = root.querySelectorAll("pre code.language-mermaid");
     if (mermaidBlocks.length > 0) {{
       try {{
         mermaid.initialize({{ startOnLoad: false, theme: "{mermaid_theme}" }});
@@ -103,7 +113,7 @@ class PreviewHtmlBuilder:
           var pre = block.parentElement;
           var container = document.createElement("div");
           container.className = "mermaid";
-          container.id = "mermaid-" + idx;
+          container.id = "mermaid-" + Date.now() + "-" + idx;
           container.textContent = block.textContent;
           pre.replaceWith(container);
         }});
@@ -111,8 +121,25 @@ class PreviewHtmlBuilder:
       }} catch(e) {{ console.warn("Mermaid init failed:", e); }}
     }}
 
-    // 复制按钮
-    document.querySelectorAll("pre").forEach(function(pre) {{
+    if (typeof katex !== "undefined") {{
+      root.querySelectorAll(".math-block").forEach(function(el) {{
+        try {{ katex.render(el.textContent, el, {{ displayMode: true, throwOnError: false }}); }} catch(e) {{}}
+      }});
+      root.querySelectorAll(".math-inline").forEach(function(el) {{
+        try {{ katex.render(el.textContent, el, {{ displayMode: false, throwOnError: false }}); }} catch(e) {{}}
+      }});
+    }}
+
+    root.querySelectorAll(".task-checkbox").forEach(function(cb) {{
+      cb.addEventListener("change", function() {{
+        var idx = cb.getAttribute("data-task-index");
+        var checked = cb.checked ? "1" : "0";
+        window.location.href = "task-toggle://" + idx + "/" + checked;
+      }});
+    }});
+
+    root.querySelectorAll("pre").forEach(function(pre) {{
+      if (pre.querySelector(".copy-button")) return;
       var btn = document.createElement("button");
       btn.className = "copy-button";
       btn.textContent = "复制";
@@ -134,7 +161,37 @@ class PreviewHtmlBuilder:
         setTimeout(function() {{ btn.textContent = "复制"; btn.classList.remove("copied"); }}, 2000);
       }});
     }});
-  }});
+  }}
+
+  function replaceMarkdownBody(html, keepScroll) {{
+    var el = document.querySelector(".scroll");
+    if (!el) return;
+    var scrollRatio = 0;
+    if (keepScroll) {{
+      scrollRatio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
+    }}
+    el.innerHTML = html;
+    decoratePreviewContent(el);
+    if (document.body.classList.contains("has-outline")) {{
+      buildOutline();
+    }}
+    if (keepScroll) {{
+      var maxScroll = el.scrollHeight - el.clientHeight;
+      el.scrollTop = maxScroll * scrollRatio;
+    }} else {{
+      el.scrollTop = 0;
+    }}
+  }}
+
+  function updatePreviewBase(href) {{
+    var base = document.getElementById("previewBase");
+    if (!base) {{
+      base = document.createElement("base");
+      base.id = "previewBase";
+      document.head.insertBefore(base, document.head.firstChild);
+    }}
+    base.setAttribute("href", href || "");
+  }}
 
   function syncScrollTo(ratio) {{
     var el = document.querySelector(".scroll");
@@ -192,7 +249,7 @@ class PreviewHtmlBuilder:
     margin: 0; padding: 0; height: 100%; overflow: hidden;
     background: transparent !important;
     color: {ts["text_color"]};
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: {self.font_size}px;
   }}
   .content {{
@@ -242,7 +299,15 @@ class PreviewHtmlBuilder:
   .mermaid svg {{ max-width: 100%; }}"""
 
     def _css_misc(self):
-        return ""
+        return """
+  .math-block { text-align: center; margin: 16px 0; overflow-x: auto; }
+  .math-inline { display: inline; }
+  .task-checkbox {
+    width: 16px; height: 16px; margin: 0 6px 0 0;
+    vertical-align: middle; cursor: pointer;
+    accent-color: #0078d4;
+  }
+  li:has(.task-checkbox) { list-style: none; margin-left: -20px; }"""
 
     def _d(self, dark_val, light_val):
         """暗色/亮色快捷选择"""
