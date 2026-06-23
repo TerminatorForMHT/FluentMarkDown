@@ -64,8 +64,12 @@ class MarkdownDocument:
     def _add_to_recent_files(self, file_path):
         if not file_path:
             return
-        if file_path in self._recent_files:
-            self._recent_files.remove(file_path)
+        file_path = os.path.normpath(os.path.abspath(file_path))
+        # 去重：移除所有等价路径
+        self._recent_files = [
+            fp for fp in self._recent_files
+            if os.path.normpath(os.path.abspath(fp)) != file_path
+        ]
         self._recent_files.insert(0, file_path)
         if len(self._recent_files) > 10:
             self._recent_files = self._recent_files[:10]

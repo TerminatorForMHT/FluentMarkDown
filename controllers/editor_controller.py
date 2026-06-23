@@ -60,13 +60,77 @@ class EditorController:
         html = re.sub(r'<img\s+src="([^"]+)"', replace_path, html)
         return html
 
+    def render_body_html(self):
+        """将 markdown 内容渲染为 HTML body 片段（含公式保护、任务列表、图片路径转换）"""
+        content = self.document.content
+        content, math_placeholders = self._protect_math(content)
+        html = markdown.markdown(content, extensions=['fenced_code', 'extra', 'tables'])
+        html = self._restore_math(html, math_placeholders)
+        html = self._render_task_list(html)
+        html = self._convert_image_paths(html)
+        return html
+
     def render_preview(self, is_dark=False):
         ts = self._get_theme_styles(is_dark)
-        # 添加更多扩展支持图片和其他格式
-        html = markdown.markdown(self.document.content, extensions=['fenced_code', 'extra', 'tables'])
-        # 转换图片路径为 file:// 协议
-        html = self._convert_image_paths(html)
+        html = self.render_body_html()
         return self._build_html(html, ts, is_dark)
+
+    def _render_task_list(self, html):
+        """将 markdown 生成的 [ ] / [x] 列表项转为可交互的 checkbox"""
+        task_index = [0]
+
+        def _replace_task(match):
+            prefix = match.group(1)
+            checked = match.group(2).lower() == 'x'
+            text_after = match.group(3)
+            idx = task_index[0]
+            task_index[0] += 1
+            checked_attr = ' checked' if checked else ''
+            return (
+                f'{prefix}<input type="checkbox" class="task-checkbox" '
+                f'data-task-index="{idx}"{checked_attr}>{text_after}'
+            )
+
+        # 匹配 <li> 开头的 [ ] 或 [x]
+        html = re.sub(
+            r'(<li[^>]*>)\s*\[([ xX])\]\s*(.*?)',
+            _replace_task,
+            html
+        )
+        return html
+
+    def _protect_math(self, text):
+        """将 $$...$$ 和 $...$ 替换为占位符，防止 markdown 破坏公式内容"""
+        placeholders = {}
+        counter = [0]
+
+        def _replace(match):
+            key = f"MATHPLACEHOLDER{counter[0]}END"
+            counter[0] += 1
+            raw = match.group(0)
+            if raw.startswith('$$'):
+                inner = match.group(1)
+                placeholders[key] = f'<div class="math-block">{self._escape_html(inner)}</div>'
+            else:
+                inner = match.group(1)
+                placeholders[key] = f'<span class="math-inline">{self._escape_html(inner)}</span>'
+            return key
+
+        # 先处理 $$...$$ （块级，可跨行）
+        text = re.sub(r'\$\$([\s\S]+?)\$\$', _replace, text)
+        # 再处理 $...$ （行内，不跨行）
+        text = re.sub(r'(?<!\$)\$([^\$\n]+?)\$(?!\$)', _replace, text)
+        return text, placeholders
+
+    @staticmethod
+    def _escape_html(text):
+        return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    @staticmethod
+    def _restore_math(html, placeholders):
+        for key, value in placeholders.items():
+            html = html.replace(key, value)
+        return html
 
     def _get_theme_styles(self, is_dark):
         from models.themes import PreviewThemes
@@ -85,147 +149,6 @@ class EditorController:
         return ts
 
     def _build_html(self, html, ts, is_dark=False):
-        r = 8
-        styled_html = '''
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/''' + ('github-dark' if is_dark else 'github') + '''.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    overflow: hidden;
-    background: transparent !important;
-    color: ''' + ts["text_color"] + ''';
-    font-family: Arial, sans-serif;
-    font-size: ''' + str(self.font_size) + '''px;
-  }
-
-  .content {
-    height: 100%;
-    background: ''' + ts["background_color"] + ''';
-    border-top-right-radius: ''' + str(r) + '''px;
-    border-bottom-right-radius: ''' + str(r) + '''px;
-    overflow: hidden;
-  }
-
-  .scroll {
-    height: 100%;
-    overflow-y: auto;
-    box-sizing: border-box;
-    padding: 20px 20px 36px 20px;
-  }
-
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-track { background: ''' + ts["scrollbar_track"] + '''; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb { background: ''' + ts["scrollbar_thumb"] + '''; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: ''' + ts["scrollbar_thumb_hover"] + '''; }
-
-  h1,h2,h3,h4,h5,h6 { color: ''' + ts["heading_color"] + '''; margin: 20px 0 10px; }
-  p { margin: 0 0 10px; }
-  img { max-width: 100%; height: auto; border-radius: 4px; margin: 10px 0; }
-
-  code { background: ''' + ts["code_bg"] + '''; padding: 2px 4px; border-radius: 3px; color: ''' + ts["text_color"] + '''; }
-  pre { position: relative; background: ''' + ts["code_bg"] + '''; padding: 10px; border-radius: 5px; overflow-x: auto; margin: 10px 0; color: ''' + ts["text_color"] + '''; }
-  pre code { background: transparent; padding: 0; border-radius: 0; }
-  pre code.hljs { background: transparent; padding: 0; }
-  .copy-button { position: absolute; top: 5px; right: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 6px; font-size: 12px; cursor: pointer; color: ''' + ts["text_color"] + '''; z-index: 10; }
-  .copy-button:hover { background: rgba(255,255,255,0.3); }
-  .copy-button.copied { background: rgba(76,175,80,0.7); color: white; }
-  .mermaid { text-align: center; margin: 16px 0; }
-  .mermaid svg { max-width: 100%; }
-
-  blockquote {
-    border-left: 4px solid rgba(100,149,237,0.5);
-    margin: 10px 0;
-    padding: 10px 15px;
-    background: ''' + ts["blockquote_bg"] + ''';
-  }
-
-  a { color: ''' + ts["link_color"] + '''; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-  th, td { border: 1px solid rgba(0,0,0,0.12); padding: 8px; text-align: left; }
-  th { background: ''' + ts["code_bg"] + '''; }
-</style>
-</head>
-<body>
-  <div class="content">
-    <div class="scroll">
-      ''' + html + '''
-    </div>
-  </div>
-</body>
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    // --- highlight.js: 代码块语法高亮 ---
-    document.querySelectorAll("pre code").forEach(function(block) {
-      if (!block.classList.contains("language-mermaid")) {
-        try { hljs.highlightElement(block); } catch(e) {}
-      }
-    });
-
-    // --- Mermaid: 图表渲染 ---
-    var mermaidBlocks = document.querySelectorAll("pre code.language-mermaid");
-    if (mermaidBlocks.length > 0) {
-      try {
-        mermaid.initialize({ startOnLoad: false, theme: "''' + ('dark' if is_dark else 'default') + '''" });
-        mermaidBlocks.forEach(function(block, idx) {
-          var pre = block.parentElement;
-          var container = document.createElement("div");
-          container.className = "mermaid";
-          container.id = "mermaid-" + idx;
-          container.textContent = block.textContent;
-          pre.replaceWith(container);
-        });
-        mermaid.run();
-      } catch(e) { console.warn("Mermaid init failed:", e); }
-    }
-
-    // --- 复制按钮 ---
-    document.querySelectorAll("pre").forEach(function(pre) {
-      var btn = document.createElement("button");
-      btn.className = "copy-button";
-      btn.textContent = "复制";
-      pre.appendChild(btn);
-      btn.addEventListener("click", function() {
-        var code = pre.querySelector("code");
-        if (!code) return;
-        var text = code.textContent;
-        var ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.cssText = "position:fixed;left:-9999px;top:-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        try {
-          document.execCommand("copy");
-          btn.textContent = "已复制";
-          btn.classList.add("copied");
-        } catch(e) {
-          btn.textContent = "失败";
-        }
-        document.body.removeChild(ta);
-        setTimeout(function() { btn.textContent = "复制"; btn.classList.remove("copied"); }, 2000);
-      });
-    });
-  });
-
-  // --- 同步滚动：接收来自 Qt 的滚动比例 ---
-  function syncScrollTo(ratio) {
-    var el = document.querySelector(".scroll");
-    if (el) {
-      var maxScroll = el.scrollHeight - el.clientHeight;
-      el.scrollTop = maxScroll * ratio;
-    }
-  }
-</script>
-</html>
-'''
-        return styled_html
+        from models.html_template import PreviewHtmlBuilder
+        builder = PreviewHtmlBuilder(ts, self.font_size, is_dark)
+        return builder.build(html)

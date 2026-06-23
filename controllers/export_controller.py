@@ -131,11 +131,24 @@ class ExportController:
             return False, f"导出 Word 文档时出错:\n{str(e)}"
 
     @staticmethod
-    def export_html(file_path, markdown_text):
+    def export_html(file_path, rendered_html):
+        """导出带主题样式的完整 HTML 文件。
+
+        Parameters
+        ----------
+        file_path : str
+            目标文件路径。
+        rendered_html : str
+            由 PreviewHtmlBuilder 生成的完整 HTML 字符串。
+        """
         try:
-            html = markdown.markdown(markdown_text, extensions=['fenced_code'])
+            # 去掉预览容器的高度限制，让内容自然展开
+            html = rendered_html
+            html = html.replace('height: 100%;', 'height: auto;')
+            html = html.replace('overflow: hidden;', 'overflow: visible;')
+            html = html.replace('overflow-y: auto;', 'overflow-y: visible;')
             with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(f"<!doctype html><meta charset='utf-8'><body>{html}</body>")
+                f.write(html)
             return True, f"HTML 文件已成功导出到:\n{file_path}"
         except Exception as e:
             return False, f"导出 HTML 文件时出错:\n{str(e)}"
