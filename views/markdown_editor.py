@@ -1954,7 +1954,7 @@ class MarkdownWidget(QFrame):
         if max_val <= 0:
             return
         ratio = scrollbar.value() / max_val
-        js = f"syncScrollTo({ratio});"
+        js = f"if (typeof syncScrollTo === 'function') syncScrollTo({ratio});"
         try:
             self.preview.page().runJavaScript(js)
         except Exception:

@@ -1,6 +1,6 @@
 PyQt5
+PyQt-Fluent-Widgets[full]
 pyqtwebengine
 markdown
-pyqt-fluent-widgets
 fpdf
 python-docx

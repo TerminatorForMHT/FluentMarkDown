@@ -1,5 +1,15 @@
 """预览 HTML 模板构建器"""
 
+import sys
+from pathlib import Path
+
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = Path(sys._MEIPASS)
+else:
+    _BASE_DIR = Path(__file__).resolve().parent.parent
+
+_VENDOR_DIR = _BASE_DIR / "assets" / "vendor"
+
 
 class PreviewHtmlBuilder:
     """将 Markdown 渲染后的 HTML 包装成完整的预览页面。
@@ -16,9 +26,9 @@ class PreviewHtmlBuilder:
         预览容器圆角（px），默认 8。
     """
 
-    HIGHLIGHT_CDN = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0"
-    MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
-    KATEX_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
+    HIGHLIGHT_DIR = (_VENDOR_DIR / "highlight").as_uri()
+    MERMAID_JS = (_VENDOR_DIR / "mermaid" / "mermaid.min.js").as_uri()
+    KATEX_DIR = (_VENDOR_DIR / "katex").as_uri()
 
     def __init__(self, theme_styles, font_size=16, is_dark=False, border_radius=8):
         self.ts = theme_styles
@@ -51,16 +61,16 @@ class PreviewHtmlBuilder:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="{self.HIGHLIGHT_CDN}/styles/{hljs_theme}.min.css">
-<link rel="stylesheet" href="{self.KATEX_CDN}/katex.min.css">
+<link rel="stylesheet" href="{self.HIGHLIGHT_DIR}/styles/{hljs_theme}.min.css">
+<link rel="stylesheet" href="{self.KATEX_DIR}/katex.min.css">
 <script>
   if (typeof structuredClone === "undefined") {{
     window.structuredClone = function(obj) {{ return JSON.parse(JSON.stringify(obj)); }};
   }}
 </script>
-<script defer src="{self.HIGHLIGHT_CDN}/highlight.min.js"></script>
-<script defer src="{self.MERMAID_CDN}"></script>
-<script defer src="{self.KATEX_CDN}/katex.min.js"></script>
+<script defer src="{self.HIGHLIGHT_DIR}/highlight.min.js"></script>
+<script defer src="{self.MERMAID_JS}"></script>
+<script defer src="{self.KATEX_DIR}/katex.min.js"></script>
 <style>
 {self._css_base()}
 {self._css_typography()}
