@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  #editor { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="editor"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.0/min/vs/loader.min.js"></script>
+<script>
+// ═══════ 配置 Monaco Loader ═══════
+require.config({
+  paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.0/min/vs' }
+});
+
+// ═══════ WebView2 通信桥 ═══════
+function postToHost(msg) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage(msg);
+  }
+}
+
+let editor = null;
+let debounceTimer = null;
+
+require(['vs/editor/editor.main'], function() {
+  // ── Markdown 语言配置增强 ──
+  monaco.languages.register({ id: 'markdown' });
+
+  // ── 创建编辑器 ──
+  editor = monaco.editor.create(document.getElementById('editor'), {
+    value: '',
+    language: 'markdown',
+    theme: 'vs-dark',
+    fontSize: 14,
+    fontFamily: "'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
+    fontLigatures: true,
+    lineNumbers: 'on',
+    minimap: { enabled: false },
+    wordWrap: 'on',
+    tabSize: 4,
+    insertSpaces: true,
+    autoIndent: 'full',
+    formatOnPaste: true,
+    renderWhitespace: 'selection',
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true },
+    scrollBeyondLastLine: false,
+    smoothScrolling: true,
+    cursorBlinking: 'smooth',
+    cursorSmoothCaretAnimation: 'on',
+    padding: { top: 16, bottom: 16 },
+    suggest: {
+      showWords: false,
+      snippets: 'inline',
+    },
+    quickSuggestions: { other: false, comments: false, strings: false },
+    parameterHints: { enabled: false },
+    // 自动闭合
+    autoClosingBrackets: 'always',
+    autoClosingQuotes: 'always',
+    autoSurround: 'languageDefined',
+    // 折叠
+    folding: true,
+    showFoldingControls: 'mouseover',
+    // 右键菜单
+    contextmenu: true,
+  });
+
+  // ── 内容变化 → 通知 C# ──
+  editor.onDidChangeModelContent(function() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function() {
+      postToHost({ type: 'contentChanged', content: editor.getValue() });
+    }, 150);
+  });
+
+  // ── 滚动事件（用于同步预览滚动）──
+  editor.onDidScrollChange(function(e) {
+    if (e.scrollTopChanged) {
+      var info = editor.getScrollTop() / Math.max(1, editor.getScrollHeight() - editor.getLayoutInfo().height);
+      postToHost({ type: 'scroll', ratio: info });
+    }
+  });
+
+  // ── 注册 Markdown 快捷键 ──
+  // 加粗 Ctrl+B
+  editor.addAction({
+    id: 'md-bold',
+    label: 'Bold',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB],
+    run: function(ed) { wrapSelection('**', '**'); }
+  });
+
+  // 斜体 Ctrl+I
+  editor.addAction({
+    id: 'md-italic',
+    label: 'Italic',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
+    run: function(ed) { wrapSelection('*', '*'); }
+  });
+
+  // 行内代码 Ctrl+Shift+K
+  editor.addAction({
+    id: 'md-code',
+    label: 'Inline Code',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
+    run: function(ed) { wrapSelection('`', '`'); }
+  });
+
+  // 链接 Ctrl+K
+  editor.addAction({
+    id: 'md-link',
+    label: 'Insert Link',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK],
+    run: function(ed) {
+      var sel = ed.getModel().getValueInRange(ed.getSelection());
+      if (sel) {
+        ed.executeEdits('md-link', [{ range: ed.getSelection(), text: '[' + sel + '](url)' }]);
+      } else {
+        var pos = ed.getPosition();
+        ed.executeEdits('md-link', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column), text: '[text](url)' }]);
+        ed.setPosition(new monaco.Position(pos.lineNumber, pos.column + 1));
+        ed.setSelection(new monaco.Range(pos.lineNumber, pos.column + 1, pos.lineNumber, pos.column + 5));
+      }
+    }
+  });
+
+  // 查找 Ctrl+F (Monaco 内置)
+  // 查找替换 Ctrl+H
+  editor.addAction({
+    id: 'md-find-replace',
+    label: 'Find and Replace',
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH],
+    run: function(ed) {
+      ed.getAction('editor.action.startFindReplaceAction').run();
+    }
+  });
+
+  // ── 自动补全建议 ──
+  monaco.languages.registerCompletionItemProvider('markdown', {
+    provideCompletionItems: function(model, position) {
+      var word = model.getWordUntilPosition(position);
+      var range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn
+      };
+
+      var suggestions = [
+        { label: '# Heading 1', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '# ${1:Title}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: '## Heading 2', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '## ${1:Title}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: '### Heading 3', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '### ${1:Title}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Code Block', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '```${1:language}\n$0\n```', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Table', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '| ${1:Header1} | ${2:Header2} | ${3:Header3} |\n| --- | --- | --- |\n| $0 |  |  |', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Image', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '![${1:alt}](${2:url})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Task List', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '- [ ] ${1:Task}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Blockquote', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '> ${1:Quote}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'Horizontal Rule', kind: monaco.languages.CompletionItemKind.Snippet, insertText: '\n---\n', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+      ];
+
+      return { suggestions: suggestions };
+    }
+  });
+
+  // ── 通知 C# 编辑器已就绪 ──
+  postToHost({ type: 'ready' });
+});
+
+// ═══════ 工具函数 ═══════
+function wrapSelection(before, after) {
+  var sel = editor.getSelection();
+  var text = editor.getModel().getValueInRange(sel);
+
+  if (text.startsWith(before) && text.endsWith(after) && text.length > before.length + after.length) {
+    // 已包裹 → 移除
+    var inner = text.substring(before.length, text.length - after.length);
+    editor.executeEdits('wrap', [{ range: sel, text: inner }]);
+  } else if (text) {
+    editor.executeEdits('wrap', [{ range: sel, text: before + text + after }]);
+  } else {
+    var pos = editor.getPosition();
+    editor.executeEdits('wrap', [{
+      range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+      text: before + after
+    }]);
+    editor.setPosition(new monaco.Position(pos.lineNumber, pos.column + before.length));
+  }
+}
+
+// ═══════ 接收 C# 命令 ═══════
+window.chrome.webview.addEventListener('message', function(e) {
+  var msg = e.data;
+  if (typeof msg === 'string') {
+    try { msg = JSON.parse(msg); } catch(err) { return; }
+  }
+
+  switch (msg.type) {
+    case 'setContent':
+      if (editor) {
+        editor.setValue(msg.content || '');
+        // 清空撤销历史
+        editor.getModel().pushStackElement();
+      }
+      break;
+
+    case 'command':
+      if (!editor) break;
+      var cmd = msg.command;
+      if (cmd === 'bold') wrapSelection('**', '**');
+      else if (cmd === 'italic') wrapSelection('*', '*');
+      else if (cmd === 'code') wrapSelection('`', '`');
+      else if (cmd === 'strikethrough') wrapSelection('~~', '~~');
+      else if (cmd === 'link') {
+        var sel = editor.getSelection();
+        var text = editor.getModel().getValueInRange(sel);
+        editor.executeEdits('link', [{ range: sel, text: '[' + (text || 'text') + '](url)' }]);
+      }
+      else if (cmd === 'find') editor.getAction('actions.find').run();
+      else if (cmd === 'findReplace') editor.getAction('editor.action.startFindReplaceAction').run();
+      else if (cmd.startsWith('insert:')) {
+        var insertText = cmd.substring(7);
+        var pos = editor.getPosition();
+        editor.executeEdits('ai-insert', [{
+          range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+          text: insertText
+        }]);
+      }
+      break;
+
+    case 'setTheme':
+      if (editor) {
+        monaco.editor.setTheme(msg.theme || 'vs-dark');
+      }
+      break;
+
+    case 'setFontSize':
+      if (editor) {
+        editor.updateOptions({ fontSize: msg.size || 14 });
+      }
+      break;
+
+    case 'setWordWrap':
+      if (editor) {
+        editor.updateOptions({ wordWrap: msg.wrap ? 'on' : 'off' });
+      }
+      break;
+
+    case 'setMinimap':
+      if (editor) {
+        editor.updateOptions({ minimap: { enabled: !!msg.show } });
+      }
+      break;
+  }
+});
+</script>
+</body>
+</html>
