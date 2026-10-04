@@ -67,6 +67,9 @@ class PreviewHtmlBuilder:
   if (typeof structuredClone === "undefined") {{
     window.structuredClone = function(obj) {{ return JSON.parse(JSON.stringify(obj)); }};
   }}
+  if (typeof Object.hasOwn !== "function") {{
+    Object.hasOwn = function(obj, key) {{ return Object.prototype.hasOwnProperty.call(obj, key); }};
+  }}
 </script>
 <script defer src="{self.HIGHLIGHT_DIR}/highlight.min.js"></script>
 <script defer src="{self.MERMAID_JS}"></script>
