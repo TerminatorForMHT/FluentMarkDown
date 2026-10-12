@@ -1046,7 +1046,6 @@ class MarkdownWidget(QFrame):
         }}
         .shortcuts {{
             display: flex;
-            gap: 24px;
             justify-content: center;
             flex-wrap: wrap;
         }}
@@ -1054,6 +1053,8 @@ class MarkdownWidget(QFrame):
             background: {shortcut_bg};
             padding: 12px 20px;
             border-radius: 8px;
+            /* 旧版 Chromium（Qt5 WebEngine）不支持 flex gap，用 margin 实现间距 */
+            margin: 6px 12px;
         }}
         .shortcut-key {{
             background: {shortcut_key_bg};
