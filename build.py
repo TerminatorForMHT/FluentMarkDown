@@ -35,6 +35,7 @@ def build_exe():
         "--windowed",
         "--icon", ICON_FILE,
         "--add-data", f"resources;resources",
+        "--add-data", f"assets;assets",
         "--collect-submodules", "views",
         "--collect-submodules", "controllers",
         "--collect-submodules", "models",
